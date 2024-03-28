@@ -62,6 +62,19 @@ pub async fn complete(
     Ok(())
 }
 
+/// Take profits
+#[poise::command(slash_command,ephemeral, check = check)]
+pub async fn pay(
+    ctx: Context<'_>,
+    #[description = "The ID of the deposit to complete"]
+    n_diamonds: u64
+) -> Result<(), Error> {
+    let banker = player_id(ctx.author());
+    ctx.data().write().await.run_action(Action::WithdrawProfit { n_diamonds, banker }).await?;
+    ctx.reply("Profits taken").await?;
+    Ok(())
+}
+
 /// Gets the next withdrawal that needs to be completed
 #[poise::command(slash_command,ephemeral, check = check)]
 pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
