@@ -34,9 +34,8 @@ const DIAMOND_NAME: &str = "diamond";
 const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
     withdraw_flat: 1000,
     withdraw_per_stack: 40,
-    expedited: 1000,
+    expedited: 5000,
 };
-const DEFAULT_STACK: u64 = 64;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Action {
@@ -160,8 +159,12 @@ struct WrappedAction {
     action: Action,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum OrderType {
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct AssetInfo {
+    stack_size: u64
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]pub enum OrderType {
     Buy,
     Sell
 }
@@ -201,7 +204,8 @@ pub enum StateApplyError {
     UnauthorisedWithdrawl{asset: AssetId, amount_overdrawn: Option<u64>},
     /// Some 1337 hacker tried an overflow attack >:(
     Overflow,
-    InvalidId{id: u64}
+    InvalidId{id: u64},
+    UnknownAsset{asset: AssetId}
 }
 impl std::fmt::Display for StateApplyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -225,6 +229,9 @@ impl std::fmt::Display for StateApplyError {
             StateApplyError::InvalidId { id } => {
                 write!(f, "The action ID {id} was invalid")
             }
+            StateApplyError::UnknownAsset { asset } => {
+                write!(f, "The item \"{asset}\" is not on our list")
+            },
         }
         
     }
@@ -240,7 +247,7 @@ struct UpdateBankPrices {
 #[derive(Debug)]
 pub struct State {
     next_id: u64,
-    stack_sizes: std::collections::HashMap<AssetId, u64>,
+    asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     fees: UpdateBankPrices,
 
     restricted_assets: std::collections::HashSet<AssetId>,
@@ -276,9 +283,9 @@ impl State {
         self.assets.get(player).map_or_else(Default::default, Clone::clone)
     }
     /// Create a new empty state
-    pub fn new() -> State {
+    pub fn new(asset_info: std::collections::HashMap<AssetId, AssetInfo>) -> State {
         State{
-            stack_sizes: Default::default(),
+            asset_info,
             fees: INITIAL_BANK_PRICES,
             restricted_assets: Default::default(),
             orders: Default::default(),
@@ -300,7 +307,8 @@ impl State {
     pub fn calc_withdrawal_fee(&self, assets: &std::collections::BTreeMap<AssetId, u64>) -> Result<u64, StateApplyError> {
         let mut total_fee = self.fees.withdraw_flat;
         for (asset, count) in assets {
-            total_fee += count.div_ceil(*self.stack_sizes.get(asset).unwrap_or(&DEFAULT_STACK)).checked_mul(self.fees.withdraw_per_stack).ok_or(StateApplyError::Overflow)?;
+            total_fee += count.div_ceil(self.asset_info.get(asset).ok_or(StateApplyError::UnknownAsset{asset:asset.clone()})?.stack_size)
+                              .checked_mul(self.fees.withdraw_per_stack).ok_or(StateApplyError::Overflow)?;
         }
         Ok(total_fee)
     }
@@ -637,8 +645,8 @@ impl State {
                             }
                             // If the buy order is more than enough...
                             std::cmp::Ordering::Greater => {
-                                // ... give the money ...
-                                *player_balance += amount_remaining * sell_order.coins_per;
+                                // ... give the assets ...
+                                *player_asset_count += amount_remaining;
                                 // ... if they bought it cheap, give them the difference ...
                                 *player_balance += amount_remaining * (coins_per - sell_order.coins_per);
                                 // ... reduce the sell order
@@ -832,8 +840,8 @@ impl State {
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
-    pub async fn replay(trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin)) -> Result<State, StateApplyError> {
-        let mut state = Self::new();
+    pub async fn replay(trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin), asset_info: std::collections::HashMap<AssetId, AssetInfo>) -> Result<State, StateApplyError> {
+        let mut state = Self::new(asset_info);
 
         let trade_file_reader = tokio::io::BufReader::new(trade_file);
         let mut trade_file_lines = trade_file_reader.lines();

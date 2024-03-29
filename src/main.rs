@@ -1,6 +1,7 @@
 mod commands;
 mod trade;
 use poise::serenity_prelude as serenity;
+use tokio::io::AsyncReadExt;
 
 #[tokio::main]
 async fn main() {
@@ -11,8 +12,11 @@ async fn main() {
 
     let argv: Vec<_> = std::env::args().collect();
     let path: &str = &argv[1];
+    let asset_path: &str = &argv[2];
+    let mut assets = String::new();
+    tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
     let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(path).await.expect("Unable to open trade list");
-    let state = trade::State::replay(&mut trade_file).await.expect("Could not replay trades");
+    let state = trade::State::replay(&mut trade_file, serde_json::from_str(&assets).expect("Unable to parse asset info")).await.expect("Could not replay trades");
     let data = std::sync::Arc::new(tokio::sync::RwLock::new(commands::Data{state, trade_file}));
 
     // Discord setup
