@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Mul};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 // We use a base coins, which represent 1/1000 of a diamond
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, ser::SerializeMap};
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Default, Debug, Clone, Hash)]
 pub struct PlayerId(String);
@@ -12,6 +12,7 @@ impl PlayerId {
     pub(crate) fn evil_constructor(s: String) -> PlayerId { PlayerId(s) }
     #[deprecated = "Do not use this, use user_id instead"]
     pub(crate) fn evil_deref(&self) -> &String { &self.0 }
+    pub fn the_bank() -> PlayerId { PlayerId("bank".to_owned()) }
 }
 impl<'de> Deserialize<'de> for PlayerId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -27,14 +28,21 @@ impl Serialize for PlayerId {
         String::serialize(&self.0, serializer)
     }
 }
+impl core::fmt::Display for PlayerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 pub type AssetId = String;
 
-const COINS_PER_DIAMOND: u64 = 1000;
-const DIAMOND_NAME: &str = "diamond";
+pub const COINS_PER_DIAMOND: u64 = 1000;
+pub const DIAMOND_NAME: &str = "diamond";
 const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
     withdraw_flat: 1000,
-    withdraw_per_stack: 40,
+    withdraw_per_stack: 50,
     expedited: 5000,
+    investment_share: 0.5,
+    instant_smelt_per_stack: 100
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -105,7 +113,9 @@ pub enum Action {
     UpdateBankPrices {
         withdraw_flat: u64,
         withdraw_per_stack: u64,
-        expedited: u64
+        expedited: u64,
+        investment_share: f64,
+        instant_smelt_per_stack: u64
     },
     // TODO: Not sure about these yet, let's see what demand we get
     // /// A futures contract is when someone promises to pay someone for assets in the future
@@ -143,9 +153,27 @@ pub enum Action {
     UpdateBankers {
         bankers: Vec<PlayerId>
     },
-    WithdrawProfit {
-        n_diamonds: u64,
-        banker: PlayerId
+    UpdateInvestables {
+        assets: Vec<AssetId>
+    },
+    Invest {
+        player: PlayerId,
+        asset: AssetId,
+        count: u64
+    },
+    Uninvest {
+        player: PlayerId,
+        asset: AssetId,
+        count: u64
+    },
+    UpdateConvertables {
+        convertables: Vec<(AssetId, AssetId)>
+    },
+    InstantConvert {
+        player: PlayerId,
+        from: AssetId,
+        to: AssetId,
+        count: u64
     }
 }
 
@@ -164,7 +192,7 @@ pub struct AssetInfo {
     stack_size: u64
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]pub enum OrderType {
+#[derive(Debug, PartialEq, Eq, Clone, Serialize)]pub enum OrderType {
     Buy,
     Sell
 }
@@ -177,11 +205,11 @@ impl std::fmt::Display for OrderType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 pub struct PendingOrder {
     pub id: u64,
     pub coins_per: u64,
-    pub player: Option<PlayerId>,
+    pub player: PlayerId,
     pub amount_remaining: u64,
     pub asset: AssetId,
     pub order_type: OrderType
@@ -205,7 +233,10 @@ pub enum StateApplyError {
     /// Some 1337 hacker tried an overflow attack >:(
     Overflow,
     InvalidId{id: u64},
-    UnknownAsset{asset: AssetId}
+    UnknownAsset{asset: AssetId},
+    NotInvestable{asset: AssetId},
+    InvestmentBusy{asset: AssetId, amount_over: u64},
+    NotConvertable{from: AssetId, to: AssetId}
 }
 impl std::fmt::Display for StateApplyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -232,16 +263,34 @@ impl std::fmt::Display for StateApplyError {
             StateApplyError::UnknownAsset { asset } => {
                 write!(f, "The item \"{asset}\" is not on our list")
             },
+            StateApplyError::NotInvestable { asset } => {
+                write!(f, "The item \"{asset}\" is not investable yet")
+            },
+            StateApplyError::InvestmentBusy { asset, amount_over} => {
+                write!(f, "The action failed, as we would need {amount_over} more invested {asset}")
+            },
+            StateApplyError::NotConvertable { from, to } => {
+                write!(f, "We do not currently offer conversion from {from} to {to}")
+            },
         }
         
     }
 }
 impl std::error::Error for StateApplyError {}
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct UpdateBankPrices {
     withdraw_flat: u64,
     withdraw_per_stack: u64,
-    expedited: u64
+    expedited: u64,
+    investment_share: f64,
+    instant_smelt_per_stack: u64
+}
+
+#[derive(Debug, Serialize)]
+struct Investment {
+    player: PlayerId,
+    asset: AssetId,
+    count: u64
 }
 
 #[derive(Debug)]
@@ -249,11 +298,11 @@ pub struct State {
     next_id: u64,
     asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     fees: UpdateBankPrices,
+    convertables: std::collections::HashSet<(AssetId, AssetId)>,
 
     restricted_assets: std::collections::HashSet<AssetId>,
-
-    // buy_outstanding: std::collections::HashMap<AssetId, std::collections::BinaryHeap<BuyOrder>>,
-    // sell_outstanding: std::collections::HashMap<AssetId, std::collections::BinaryHeap<SellOrder>>,
+    authorisations: std::collections::HashMap<PlayerId, std::collections::BTreeMap<AssetId, u64>>,
+    investables: std::collections::HashSet<AssetId>,
 
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 
@@ -262,16 +311,18 @@ pub struct State {
     /// XXX: this contains cancelled orders, skip over them
     best_sell: std::collections::HashMap<AssetId, std::collections::BTreeMap<u64, std::collections::VecDeque<u64>>>,
 
+    // These two tables must be kept consistent
+    asset_investments: std::collections::HashMap<AssetId, std::collections::HashMap<PlayerId, u64>>,
+    player_investments: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
+    investment_busy: std::collections::HashMap<AssetId, u64>,
+
     balances: std::collections::HashMap<PlayerId, u64>,
     assets: std::collections::HashMap<PlayerId, std::collections::BTreeMap<AssetId, u64>>,
-    authorisations: std::collections::HashMap<PlayerId, std::collections::BTreeMap<AssetId, u64>>,
     pending_normal_withdrawals: std::collections::BTreeMap<u64, PendingWithdrawl>,
     pending_expedited_withdrawals: std::collections::BTreeMap<u64, PendingWithdrawl>,
 
-    profit: u64,
     earnings: std::collections::HashMap<PlayerId, u64>,
     bankers: std::collections::HashSet<PlayerId>
-    // futures: std::collections::BTreeMap<i64, Action::Future>
 }
 impl State {
     /// Get a player's balance
@@ -300,7 +351,11 @@ impl State {
             // Start on ID 1 for nice mapping to line numbers
             next_id: 1,
             bankers: Default::default(),
-            profit: 0,
+            asset_investments: Default::default(),
+            player_investments: Default::default(),
+            investables: Default::default(),
+            investment_busy: Default::default(),
+            convertables: Default::default(),
         }
     }
     /// Calculate the withdrawal fees
@@ -316,8 +371,6 @@ impl State {
     pub fn expedite_fee(&self) -> u64 { self.fees.expedited }
     /// List all expedited
     pub fn get_expedited_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> { self.pending_expedited_withdrawals.clone() }
-    /// List all non-expedited withdrawals
-    pub fn get_normal_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> { self.pending_normal_withdrawals.clone() }
     /// List all withdrawals
     pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> { 
         let mut ret = self.pending_normal_withdrawals.clone();
@@ -374,6 +427,50 @@ impl State {
     pub fn get_bankers(&self) -> HashSet<PlayerId> { self.bankers.clone() }
     /// Returns true if the given player is an banker
     pub fn is_banker(&self, player: &PlayerId) -> bool { self.bankers.contains(player) }
+    /// Gets info about a certain asset
+    pub fn asset_info(&self, asset: &AssetId) -> Result<AssetInfo, StateApplyError> {
+        self.asset_info.get(asset).cloned().ok_or_else(|| StateApplyError::UnknownAsset { asset: asset.clone() })
+    }
+    /// Gets the amount of an asset that is invested
+    pub fn amount_invested(&self, asset: &AssetId) -> u64 {
+        let Some(investments) = self.asset_investments.get(asset)
+        else { return 0; };
+        investments.values().sum()
+    }
+    /// Gives the amount of an investable asset that remains to be lent
+    pub fn amount_free(&self, asset: &AssetId) -> u64 {
+        self.amount_invested(asset) - self.investment_busy.get(asset).cloned().unwrap_or(0)
+    }
+    /// Generic function to match buy and sell orders, investments, etc
+    fn do_match<T>(count: u64, mut elems: impl Iterator<Item = (u64, T)>) -> (u64, Vec<(u64, T)>) {
+        let mut amount_remaining = count;
+        let mut ret = Vec::new();
+        while amount_remaining > 0 {
+            let Some((this_count, data)) = elems.next()
+            else {break;};
+            match this_count.cmp(&amount_remaining) {
+                // If the elem is not enough...
+                std::cmp::Ordering::Less => {
+                    ret.push((0, data));
+                    amount_remaining -= this_count;
+                    continue;
+                },
+                // If the elem is exactly enough...
+                std::cmp::Ordering::Equal => {
+                    ret.push((0, data));
+                    amount_remaining = 0;
+                    break;
+                }
+                // If the elem is more than enough...
+                std::cmp::Ordering::Greater => {
+                    ret.push((this_count - amount_remaining, data));
+                    amount_remaining = 0;
+                    break;
+                }
+            }
+        }
+        (amount_remaining, ret)        
+    }
     /// Check if a player can afford to give up assets
     fn check_asset_removal(&self, player: &PlayerId, asset: &str, count: u64) -> Result<(), StateApplyError> {
         // If the player doesn't have an account, they definitely cannot withdraw
@@ -448,6 +545,96 @@ impl State {
         }
         Ok(())
     }
+    fn iterate_best_buy<'a>(&'a self, asset: &'a AssetId, limit: u64) -> impl Iterator<Item = u64> + 'a {
+        // Get all assets...
+        self.best_buy
+            // ... only look at the asset in question ...
+            .get(asset)
+            .into_iter()
+            // ... write out all the levels in order ... 
+            .flat_map(|i| i.iter())
+            // ... put price points in descending order ...
+            .rev()
+            // ... only look at offers above the limit ...
+            .take_while(move |(price, _)| **price >= limit)
+            // ... write out ids within each price point ...
+            .flat_map(|(_price, ids)| ids.iter().cloned())
+    }
+    fn iterate_best_sell<'a>(&'a self, asset: &'a AssetId, limit: u64) -> impl Iterator<Item = u64> + 'a {
+        // Get all assets...
+        self.best_sell
+            // ... only look at the asset in question ...
+            .get(asset)
+            .into_iter()
+            // ... write out all the levels in order ... 
+            .flat_map(|i| i.iter())
+            // ... price points are already in ascending order ...
+            // ... only look at offers below the limit ...
+            .take_while(move |(price, _)| **price <= limit)
+            // ... write out ids within each price point ...
+            .flat_map(|(_price, ids)| ids.iter().cloned())
+    }
+    fn remove_best(&mut self, asset: AssetId, order_type: OrderType) -> Option<PendingOrder> {
+        let target = match order_type { OrderType::Buy => &mut self.best_buy, OrderType::Sell => &mut self.best_sell };
+
+        let std::collections::hash_map::Entry::Occupied(mut asset_class) = target.entry(asset)
+        else { panic!("Tried to remove non-existent asset class"); };
+        let Some(mut best_level) = (match order_type {
+            // Best buy order is the highest
+            OrderType::Buy => asset_class.get_mut().last_entry(),
+            // Best sell order is the lowest
+            OrderType::Sell => asset_class.get_mut().first_entry()
+        })
+        else { panic!("Empty asset class"); };
+        let Some(id) = best_level.get_mut().pop_front()
+        else { panic!("Empty price point"); };
+        // If it exists, remove the order
+        let ret = self.orders.remove(&id);
+        // Clean up
+        if best_level.get().is_empty() { best_level.remove(); }
+        if asset_class.get().is_empty() { asset_class.remove(); }
+
+        ret
+    }
+    // Check if we can afford to lend
+    fn check_busy(&mut self, asset: &AssetId, count: u64) -> Result<(), StateApplyError> {
+        let amount_free = self.amount_free(asset);
+        if amount_free < count {
+            return Err(StateApplyError::InvestmentBusy { asset: asset.clone(), amount_over: count - amount_free })
+        }
+        Ok(())
+    }
+    // Check if we can afford to lend, and if so, mark it as lended
+    fn commit_busy(&mut self, asset: &AssetId, count: u64) -> Result<(), StateApplyError> {
+        let amount_invested = self.amount_invested(asset);
+        let amount_busy = self.investment_busy.entry(asset.clone());
+        let amount_free = amount_invested - match amount_busy {
+            std::collections::hash_map::Entry::Occupied(ref x) => *x.get(),
+            _ => 0
+        };
+        if amount_free < count {
+            return Err(StateApplyError::InvestmentBusy { asset: asset.clone(), amount_over: count - amount_free })
+        }
+        *amount_busy.or_default() += count;
+        Ok(())
+    }
+    // Distribute the profits among the investors
+    fn distribute_profit(&mut self, asset: &AssetId, amount: u64) {
+        let mut investors = self.asset_investments.get(asset).expect("Somehow got profit from nothing? That's almost definitely wrong").clone();
+        // Let's be fair and not give ourselves all the money
+        investors.remove(&PlayerId::the_bank());
+        let share = (self.fees.investment_share.mul(amount as f64) / (investors.values().sum::<u64>() as f64)).floor() as u64;
+        let mut total_distributed = 0;
+        for (investor, shares) in investors {
+            let investor_profit = share * shares;
+            total_distributed += investor_profit;
+            *self.balances.entry(investor).or_default() += investor_profit;
+        }
+        if total_distributed > amount {
+            panic!("Profit distribution imprecision was too bad");
+        }
+        *self.balances.entry(PlayerId::the_bank()).or_default() += amount - total_distributed;
+    }
     // Atomic (but not parallelisable!). 
     // This means the function will change significant things (i.e. more than just creating empty lists) IF AND ONLY IF it fully succeeds.
     // As such, we don't have to worry about giving it bad actions
@@ -508,163 +695,108 @@ impl State {
             Action::SellOrder { player, asset, count, coins_per } => {
                 // Check and take their assets first
                 self.commit_asset_removal(&player, &asset, count)?;
-                let player_balance = self.balances.entry(player.clone()).or_default();
-
-                // Perform immediate fulfillments. This cannot fail, so we don't have to worry about atomicity
-                let mut amount_remaining = count;
-                if let Some(best_asset_buys) = self.best_buy.get_mut(&asset) {
-                    // Loop until we can't take away any more assets
-                    //
-                    // If we fulfill the entire order, we *return* out of the loop instead of breaking:
-                    // breaking means that we still need to track it
-                    while amount_remaining > 0 {
-                        let Some(mut best_entry) = best_asset_buys.last_entry()
-                        else {break;};
-                        // If we are out of buy orders, stop
-                        let (buy_order, buy_order_id) = {
-                            let buy_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up");
-                            if let Some(order) = self.orders.get_mut(&buy_id) {
-                                (order, buy_id)
-                            }
-                            // Keep looping till we find a buy order we can actually use
-                            else { continue; }
-                        };
-                        // If this is less than the seller is willing to take, stop, as all further ones will be too.
-                        if buy_order.coins_per < coins_per { break; }
-
-                        // Note that, unlike in the BuyOrder case, we do not need to return funds for favourable fulfillments, as we didn't take any initially
-                        match buy_order.amount_remaining.cmp(&amount_remaining) {
-                            // If the buy order is not enough...
-                            std::cmp::Ordering::Less => {
-                                // ... give the money ...
-                                *player_balance += buy_order.amount_remaining * buy_order.coins_per;
-                                // ... give the assets ...
-                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player").clone()).or_default().entry(asset.clone()).or_default() += buy_order.amount_remaining;
-                                // ... remove the amount ...
-                                amount_remaining -= buy_order.amount_remaining;
-                                // ... delete the buy order ...
-                                self.orders.remove(&buy_order_id);
-                                best_entry.get_mut().pop_front();
-                                // ... clean up if empty
-                                if best_entry.get().is_empty() { best_entry.remove(); }
-                                // We still have potentially more fulfullments
-                                continue;
-                            },
-                            // If the buy order is exactly enough...
-                            std::cmp::Ordering::Equal => {
-                                // ... give the money ...
-                                *player_balance += buy_order.amount_remaining * buy_order.coins_per;
-                                // ... give the assets ...
-                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player").clone()).or_default().entry(asset.clone()).or_default() += buy_order.amount_remaining;
-                                // ... delete the buy order ...
-                                best_entry.get_mut().pop_front();
-                                self.orders.remove(&buy_order_id);
-                                // ... clean up if empty
-                                if best_entry.get().is_empty() { best_entry.remove(); }
-                                // We've fulfilled the whole sell order, so we can just return
-                                return Ok(());
-                            }
-                            // If the buy order is more than enough...
-                            std::cmp::Ordering::Greater => {
-                                // ... give the money ...
-                                *player_balance += amount_remaining * buy_order.coins_per;
-                                // ... give the assets ...
-                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player").clone()).or_default().entry(asset.clone()).or_default() += amount_remaining;
-                                // ... reduce the buy order
-                                buy_order.amount_remaining -= amount_remaining;
-                                // We've fulfilled the whole sell order, so we can just return
-                                return Ok(());
-                            }
+                // Then match the orders
+                let iter = self.iterate_best_buy(&asset, coins_per)
+                    .map(|idx| {
+                        match self.orders.get(&idx) {
+                            Some(order) => (order.amount_remaining, Some(order.clone())),
+                            None => (0, None)
                         }
-                    }
-                    // If we didn't return early, that means we still need more items
+                    });
+                let (amount_remaining, orders) = Self::do_match(count, iter);
+
+                // Handle successful matches
+                let mut n_coins_earned = 0;
+                for (order_remaining, maybe_order) in orders {
+                    let order_amount;
+                    let order = {
+                        if order_remaining == 0 {
+                            // Check to see this wasn't a canceled order
+                            if let Some(order_val) = self.remove_best(asset.clone(), OrderType::Buy) {
+                                order_amount = order_val.amount_remaining;
+                                order_val
+                            }
+                            else { continue; }
+                        }
+                        else {
+                            let order_ref = self.orders.get_mut(&maybe_order.expect("Partial canceled order").id).expect("Cannot get mut order");
+                            order_amount = order_ref.amount_remaining;
+                            order_ref.amount_remaining = order_remaining;
+                            order_ref.clone()
+                        }
+                    };
+                    // Calculate the amount transferred
+                    let order_transferred = order_amount - order_remaining;
+                    // ... give the money ...
+                    n_coins_earned += order_transferred * order.coins_per;
+                    // ... give the assets ...
+                    *self.assets.entry(order.player.clone()).or_default().entry(asset.clone()).or_default() += order_transferred;
                 }
-                self.best_sell.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
-                self.orders.insert(id, PendingOrder{ id, coins_per, player: Some(player), amount_remaining, asset, order_type: OrderType::Sell });
+                // Transfer the money
+                *self.balances.entry(player.clone()).or_default() += n_coins_earned;
+                
+                // If needs be, list the remaining amount
+                if amount_remaining > 0 {
+                    self.best_sell.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
+                    self.orders.insert(id, PendingOrder{ id, coins_per, player, amount_remaining, asset, order_type: OrderType::Sell });
+                }
+                
                 Ok(())
             },
             Action::BuyOrder { player, asset, count, coins_per } => {
                 // Check and take their money first
                 Self::commit_coin_removal(&mut self.balances, &player, count.checked_mul(coins_per).ok_or(StateApplyError::Overflow)?)?;
-                let player_balance = self.balances.entry(player.clone()).or_default();
-                let player_assets = self.assets.entry(player.clone()).or_default();
-                let player_asset_count = player_assets.entry(asset.clone()).or_default();
-
-                // Perform immediate fulfillments. This cannot fail, so we don't have to worry about atomicity
-                let mut amount_remaining = count;
-                if let Some(best_asset_sells) = self.best_sell.get_mut(&asset) {
-                    // Loop until we can't take away any more assets
-                    //
-                    // If we fulfill the entire order, we *return* out of the loop instead of breaking:
-                    // breaking means that we still need to track it
-                    while amount_remaining > 0 {
-                        let Some(mut best_entry) = best_asset_sells.first_entry()
-                        else {break;};
-                        // If we are out of buy orders, stop
-                        let (sell_order, sell_order_id) = {
-                            let sell_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up");
-                            if let Some(order) = self.orders.get_mut(&sell_id) {
-                                (order, sell_id)
-                            }
-                            // Keep looping till we find a buy order we can actually use
-                            else { continue; }
-                        };
-                        // If this is more than the buyer is willing to pay, stop, as all further ones will be too.
-                        if sell_order.coins_per > coins_per { break; }
-
-                        match sell_order.amount_remaining.cmp(&amount_remaining) {
-                            // If the sell order is not enough...
-                            std::cmp::Ordering::Less => {
-                                // ... give the assets ...
-                                *player_asset_count += sell_order.amount_remaining;
-                                // ... if they bought it cheap, give them the difference ...
-                                *player_balance += sell_order.amount_remaining * (coins_per - sell_order.coins_per);
-                                // ... remove the amount ...
-                                amount_remaining -= sell_order.amount_remaining;
-                                // ... delete the sell order ...
-                                self.orders.remove(&sell_order_id);
-                                best_entry.get_mut().pop_front();
-                                // ... clean up if empty
-                                if best_entry.get().is_empty() { best_entry.remove(); }
-                                // We still have potentially more fulfullments
-                                continue;
-                            },
-                            // If the buy order is exactly enough...
-                            std::cmp::Ordering::Equal => { 
-                                // ... give the assets ...
-                                *player_asset_count += sell_order.amount_remaining;
-                                // ... if they bought it cheap, give them the difference ...
-                                *player_balance += sell_order.amount_remaining * (coins_per - sell_order.coins_per);
-                                // ... delete the sell order ...
-                                self.orders.remove(&sell_order_id);
-                                best_entry.get_mut().pop_front();
-                                // ... clean up if empty
-                                if best_entry.get().is_empty() { best_entry.remove(); }
-                                // We've fulfilled the whole buy order, so we can just return
-                                return Ok(());
-                            }
-                            // If the buy order is more than enough...
-                            std::cmp::Ordering::Greater => {
-                                // ... give the assets ...
-                                *player_asset_count += amount_remaining;
-                                // ... if they bought it cheap, give them the difference ...
-                                *player_balance += amount_remaining * (coins_per - sell_order.coins_per);
-                                // ... reduce the sell order
-                                sell_order.amount_remaining -= amount_remaining;
-                                // We've fulfilled the whole buy order, so we can just return
-                                return Ok(());
-                            }
+                // Then match the orders
+                let iter = self.iterate_best_sell(&asset, coins_per)
+                    .map(|idx| {
+                        match self.orders.get(&idx) {
+                            Some(order) => (order.amount_remaining, Some(order.clone())),
+                            None => (0, None)
                         }
-                    }
-                    // If we didn't return early, that means we still need more items
+                    });
+                let (amount_remaining, orders) = Self::do_match(count, iter);
+
+                // Handle successful matches
+                let mut n_coins_saved = 0;
+                let mut n_asset_bought = 0;
+                for (order_remaining, maybe_order) in orders {
+                    let order_amount;
+                    let order = {
+                        if order_remaining == 0 {
+                            // Check to see this wasn't a canceled order
+                            if let Some(order_val) = self.remove_best(asset.clone(), OrderType::Sell) {
+                                order_amount = order_val.amount_remaining;
+                                order_val
+                            }
+                            else { continue; }
+                        }
+                        else {
+                            let order_ref = self.orders.get_mut(&maybe_order.expect("Partial canceled order").id).expect("Cannot get mut order");
+                            order_amount = order_ref.amount_remaining;
+                            order_ref.amount_remaining = order_remaining;
+                            order_ref.clone()
+                        }
+                    };
+                    // Calculate the amount transferred
+                    let order_transferred = order_amount - order_remaining;
+                    // ... give the assets ...
+                    n_asset_bought += order_transferred;
+                    // ... if they bought it cheap, give them the difference ...
+                    n_coins_saved += order_transferred * (coins_per - order.coins_per);
+                }
+                // Transfer the money
+                *self.balances.entry(player.clone()).or_default() += n_coins_saved;
+                // Transfer the assets
+                if n_asset_bought > 0 {
+                    *self.assets.entry(player.clone()).or_default().entry(asset.clone()).or_default() += n_asset_bought;
                 }
                 
-                // Clean up
-                if *player_asset_count == 0 {
-                    player_assets.remove(&asset);
+                // If needs be, list the remaining amount
+                if amount_remaining > 0 {
+                    self.best_buy.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
+                    self.orders.insert(id, PendingOrder{ id, coins_per, player, amount_remaining, asset, order_type: OrderType::Buy });
                 }
-                self.best_buy.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
-                self.orders.insert(id, PendingOrder{ id, coins_per, player: Some(player), amount_remaining, asset, order_type: OrderType::Buy });
+                
                 Ok(())
             },
             Action::WithdrawlCompleted { target, banker } => {
@@ -674,7 +806,7 @@ impl State {
                 // Mark who delivered
                 *self.earnings.entry(banker).or_default() += res.total_fee;
                 // Add the profit
-                self.profit += res.total_fee;
+                *self.balances.entry(PlayerId::the_bank()).or_default() += res.total_fee;
                 Ok(())
             },
             Action::CancelOrder { target_id } => {
@@ -683,14 +815,14 @@ impl State {
                         // If we found it as a buy...
                         OrderType::Buy => {
                             // ... refund the money ...
-                            *self.balances.entry(found.player.expect("Buy order found without player")).or_default() += found.amount_remaining * found.coins_per;
+                            *self.balances.entry(found.player).or_default() += found.amount_remaining * found.coins_per;
                             Ok(())
                         },
                         // If we found it as a sell...
                         OrderType::Sell => {
                             // ... refund the assets
                             *self.assets
-                                .entry(found.player.expect("Sell order cancelled without player")).or_default()
+                                .entry(found.player).or_default()
                                 .entry(found.asset).or_default() += found.amount_remaining * found.coins_per;
                             Ok(())
                         }
@@ -716,76 +848,50 @@ impl State {
                 Ok(())
             },
             Action::Donation { asset, count, .. } => {
+                let iter = self.iterate_best_buy(&asset, 0)
+                    .map(|idx| {
+                        match self.orders.get(&idx) {
+                            Some(order) => (order.amount_remaining, Some(order.clone())),
+                            None => (0, None)
+                        }
+                    });
+                let (amount_remaining, orders) = Self::do_match(count, iter);
                 // Nothing here can fail, so we can write code nicely :)
 
-                // Perform immediate fulfillments. This cannot fail, so we don't have to worry about atomicity
-                let mut amount_remaining = count;
-                if let Some(best_asset_buys) = self.best_buy.get_mut(&asset) {
-                    // Loop until we can't take away any more assets
-                    //
-                    // If we fulfill the entire donation, we *return* out of the loop instead of breaking:
-                    // breaking means that we still need to track it
-                    while amount_remaining > 0 {
-                        let Some(mut best_entry) = best_asset_buys.last_entry()
-                        else {break;};
-                        // If we are out of buy orders, stop
-                        let (buy_order, buy_order_id) = {
-                            let buy_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up");
-                            if let Some(order) = self.orders.get_mut(&buy_id) {
-                                (order, buy_id)
+                // Handle successful matches
+                for (order_remaining, maybe_order) in orders {
+                    let order_amount;
+                    let order = {
+                        if order_remaining == 0 {
+                            // Check to see this wasn't a canceled order
+                            if let Some(order_val) = self.remove_best(asset.clone(), OrderType::Buy) {
+                                order_amount = order_val.amount_remaining;
+                                order_val
                             }
-                            // Keep looping till we find a buy order we can actually use
                             else { continue; }
-                        };
-
-                        let buyer = buy_order.player.as_ref().expect("Buy order without player").clone();
-                        let player_balance = self.balances.entry(buyer).or_default();
-
-                        // We need to return funds, as this is likely below their price
-                        match buy_order.amount_remaining.cmp(&amount_remaining) {
-                            // If the buy order is not enough...
-                            std::cmp::Ordering::Less => {
-                                // ... give back the money ...
-                                *player_balance += buy_order.amount_remaining.checked_mul(buy_order.coins_per).ok_or(StateApplyError::Overflow)?;
-                                // ... remove the amount ...
-                                amount_remaining -= buy_order.amount_remaining;
-                                // ... delete the buy order ...
-                                self.orders.remove(&buy_order_id);
-                                best_entry.get_mut().pop_front();
-                                // ... clean up if empty
-                                if best_entry.get().is_empty() { best_entry.remove(); }
-                                // We still have potentially more fulfullments
-                                continue;
-                            },
-                            // If the buy order is exactly enough...
-                            std::cmp::Ordering::Equal => {
-                                // ... give back the money ...
-                                *player_balance += buy_order.amount_remaining.checked_mul(buy_order.coins_per).ok_or(StateApplyError::Overflow)?;
-                                // ... delete the buy order ...
-                                self.orders.remove(&buy_order_id);
-                                best_entry.get_mut().pop_front();
-                                // ... clean up if empty
-                                if best_entry.get().is_empty() { best_entry.remove(); }
-                                // We've fulfilled the whole sell order, so we can just return
-                                return Ok(());
-                            }
-                            // If the buy order is more than enough...
-                            std::cmp::Ordering::Greater => {
-                                // ... give back the money ...
-                                *player_balance += amount_remaining * buy_order.coins_per;
-                                // ... reduce the buy order
-                                buy_order.amount_remaining -= amount_remaining;
-                                // We've fulfilled the whole sell order, so we can just return
-                                return Ok(());
-                            }
                         }
-                    }
-                    // If we didn't return early, that means we still need more items
+                        else {
+                            let order_ref = self.orders.get_mut(&maybe_order.expect("Partial canceled order").id).expect("Cannot get mut order");
+                            order_amount = order_ref.amount_remaining;
+                            order_ref.amount_remaining = order_remaining;
+                            order_ref.clone()
+                        }
+                    };
+                    // Calculate the amount transferred
+                    let order_transferred = order_amount - order_remaining;
+                    // ... give the money back to the buyer ...
+                    let player = order.player;
+                    *self.balances.entry(player.clone()).or_default() += order_transferred * order.coins_per;
+                    // ... give the assets ...
+                    *self.assets.entry(player).or_default().entry(asset.clone()).or_default() += order_transferred;
                 }
-
-                self.best_sell.entry(asset.clone()).or_default().entry(0).or_default().push_back(id);
-                self.orders.insert(id, PendingOrder{ id, coins_per: 0, player: None, amount_remaining, asset, order_type: OrderType::Sell });
-
+                
+                // If needs be, list the remaining amount
+                if amount_remaining > 0 {
+                    self.best_sell.entry(asset.clone()).or_default().entry(0).or_default().push_back(id);
+                    self.orders.insert(id, PendingOrder{ id, coins_per: 0, player: PlayerId::the_bank(), amount_remaining, asset, order_type: OrderType::Sell });
+                }
+                
                 Ok(())
             },
             Action::UpdateRestricted { restricted_assets } => {
@@ -796,8 +902,8 @@ impl State {
                 self.authorisations.entry(authorisee).or_default().insert(asset, new_count);
                 Ok(())
             },
-            Action::UpdateBankPrices { withdraw_flat, withdraw_per_stack, expedited } => {
-                self.fees = UpdateBankPrices{ withdraw_flat, withdraw_per_stack, expedited };
+            Action::UpdateBankPrices { withdraw_flat, withdraw_per_stack, expedited, investment_share, instant_smelt_per_stack } => {
+                self.fees = UpdateBankPrices{ withdraw_flat, withdraw_per_stack, expedited, investment_share, instant_smelt_per_stack };
                 Ok(())
             },
             Action::TransferCoins { payer, payee, count } => {
@@ -833,8 +939,82 @@ impl State {
                 self.bankers = std::collections::HashSet::from_iter(bankers);
                 Ok(())
             },
-            Action::WithdrawProfit { n_diamonds, .. } => {
-                self.profit -= n_diamonds * COINS_PER_DIAMOND;
+            Action::UpdateInvestables { assets } => {
+                self.investables = assets.into_iter().collect();
+                Ok(())
+            },
+            Action::Invest { player, asset, count } => {
+                // Check to see if we can invest it
+                if !self.investables.contains(&asset) {
+                    return Err(StateApplyError::NotInvestable {asset});
+                }
+                // Check to see if the user can afford it, and if so, invest
+                self.commit_asset_removal(&player, &asset, count)?;
+                *self.player_investments.entry(player.clone()).or_default().entry(asset.clone()).or_default() += count;
+                *self.asset_investments.entry(asset).or_default().entry(player).or_default() += count;
+                Ok(())
+            },
+            Action::Uninvest { player, asset, count } => {
+                // Don't check to see if it's currently investable, or else stuff might get trapped
+                let std::collections::hash_map::Entry::Occupied(mut player_investment_list) = self.player_investments.entry(player.clone())
+                else { return Err(StateApplyError::Overdrawn { asset: Some(asset), amount_overdrawn: count }) };
+                let std::collections::hash_map::Entry::Occupied(mut asset_count) = player_investment_list.get_mut().entry(asset.clone())
+                else { return Err(StateApplyError::Overdrawn { asset: Some(asset), amount_overdrawn: count }) };
+
+                let std::collections::hash_map::Entry::Occupied(mut asset_investment_list) = self.asset_investments.entry(asset.clone())
+                else { panic!("Investment table corruption: player_investments found but asset missing"); };
+                let std::collections::hash_map::Entry::Occupied(mut asset_count2) = asset_investment_list.get_mut().entry(player.clone())
+                else { panic!("Investment table corruption: player_investments found but player missing"); };
+
+                match asset_count.get_mut().checked_sub(count) {
+                    Some(0) => {
+                        asset_count.remove();
+                        if player_investment_list.get().is_empty() {
+                            player_investment_list.remove();
+                        }
+                        asset_count2.remove();
+                        if asset_investment_list.get().is_empty() {
+                            asset_investment_list.remove();
+                        }
+                    }
+                    None => { 
+                        return Err(StateApplyError::Overdrawn { asset: Some(asset), amount_overdrawn: count - asset_count.get() })
+                    },
+                    Some(count) => {
+                        *asset_count .get_mut() = count;
+                        *asset_count2.get_mut() = count;
+                    }
+                }
+                Ok(())
+            },
+            Action::InstantConvert { from, to, count, player } => {
+                // Check convertable
+                if self.convertables.contains(&(from.clone(), to.clone())) {
+                    return Err(StateApplyError::NotConvertable { from, to });
+                }
+                // Calculate the fee
+                let min_stack_size = self.asset_info(&from)?.stack_size.min(self.asset_info(&to)?.stack_size);
+                let n_stacks = count.div_ceil(min_stack_size);
+                let fee = n_stacks * self.fees.instant_smelt_per_stack;
+
+                // Check to see if we can afford it
+                self.check_busy(&to, count)?;
+                // Check to see if they can afford the fees
+                self.check_coin_removal(&player, fee)?;
+                // Check to see if they can afford the assets, and if so, commit the changes
+                self.commit_asset_removal(&player, &from, count)?;
+                Self::commit_coin_removal(&mut self.balances, &player, count).expect("Unable to commit coin removal after check");
+                self.commit_busy(&to, count).expect("Unable to commit busy after check");
+                // Distribute the fee
+                self.distribute_profit(&to, fee);
+                
+                // Give the assets
+                *self.assets.entry(player).or_default().entry(to).or_default() += count;
+
+                Ok(())
+            }
+            Action::UpdateConvertables { convertables } => {
+                self.convertables = convertables.into_iter().collect();
                 Ok(())
             }
         }
@@ -869,11 +1049,30 @@ impl State {
             Ok(()) => {
                 self.next_id += 1;
                 out.write_all(line.as_bytes()).await.expect("Could not write to log, must immediately stop!");
+                out.flush().await.expect("Could not flush to log, must immediately stop!");
                 Ok(id)
             }
             Err(e) => {
                 Err(e)
             }
         }
+    }
+}
+
+impl Serialize for State {
+    // Returns an object that can be used to check we haven't gone off the rails
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("next_id", &self.next_id)?;
+        map.serialize_entry("balances", &self.balances)?;
+        map.serialize_entry("assets", &self.assets)?;
+        map.serialize_entry("orders", &self.orders)?;
+        map.serialize_entry("investments", &self.asset_investments)?;
+        map.serialize_entry("authorisations", &self.authorisations)?;
+        map.serialize_entry("restricted", &self.restricted_assets)?;
+        map.serialize_entry("investables", &self.investables)?;
+        map.serialize_entry("bankers", &self.bankers)?;
+        map.serialize_entry("fees", &self.fees)?;
+        map.end()
     }
 }

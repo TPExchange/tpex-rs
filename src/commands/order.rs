@@ -223,7 +223,7 @@ async fn cancel(ctx: Context<'_>,
         ctx.reply("No such order").await?;
         return Ok(());
     };
-    if order.player.is_some_and(|x| x == player_id(ctx.author())) {
+    if order.player == player_id(ctx.author()) {
         ctx.reply("This is not your order. Recheck the id?").await?;
         return Ok(());
     }
@@ -258,7 +258,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
         let data = ctx.data().read().await;
         let mut orders = data.state.get_orders();
         let user = player_id(ctx.author());
-        orders.retain(|_, x| x.player.as_ref().is_some_and(|player| player == &user));
+        orders.retain(|_, x| x.player == user);
 
         // Recheck what the nearest id is, and get the ones either side while we're at it
         ((prev_id, curr_id, next_id), order) = {

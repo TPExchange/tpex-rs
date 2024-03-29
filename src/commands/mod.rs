@@ -111,6 +111,15 @@ async fn restricted(ctx: Context<'_>) -> Result<(), Error> {
     ).await?;
     Ok(())
 }
+/// For lazy people who can't be bothered to write a verifier :(
+#[poise::command(slash_command,ephemeral)]
+async fn get_state(ctx: Context<'_>) -> Result<(), Error> {
+    let state = serde_json::to_string(&ctx.data().read().await.state)?;
+    ctx.send(poise::CreateReply::default()
+        .attachment(serenity::CreateAttachment::bytes(state, "state.json"))    
+    ).await?;
+    Ok(())
+}
 
 fn list_assets(data: &Data, assets: &std::collections::BTreeMap<AssetId, u64>) -> Result<CreateEmbed, StateApplyError> {
     Ok(

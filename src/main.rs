@@ -17,11 +17,16 @@ async fn main() {
     tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
     let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(path).await.expect("Unable to open trade list");
     let state = trade::State::replay(&mut trade_file, serde_json::from_str(&assets).expect("Unable to parse asset info")).await.expect("Could not replay trades");
-    let data = std::sync::Arc::new(tokio::sync::RwLock::new(commands::Data{state, trade_file}));
+
+    let Ok(token) = std::env::var("DISCORD_TOKEN")
+    else {
+        println!("Missing DISCORD_TOKEN, so verification mode enabled.\nState result:\n{}", serde_json::to_string_pretty(&state).expect("Could not serialise state"));
+        return;
+    };
 
     // Discord setup
     let mut client = {
-        let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
+        let data = std::sync::Arc::new(tokio::sync::RwLock::new(commands::Data{state, trade_file}));
         let intents = serenity::GatewayIntents::non_privileged();
     
         let framework = poise::Framework::builder()
