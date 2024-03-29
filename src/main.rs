@@ -11,8 +11,8 @@ async fn main() {
 
     let argv: Vec<_> = std::env::args().collect();
     let path: &str = &argv[1];
-    let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(path).await.expect("Unable to open trade list");
-    let state = trade::State::replay(&mut trade_file).await.expect("Could not replay trades");
+    let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(path).await.expect("Unable to open trade list.");
+    let state = trade::State::replay(&mut trade_file).await.expect("Could not replay trades.");
     let data = std::sync::Arc::new(tokio::sync::RwLock::new(commands::Data{state, trade_file}));
 
     // Discord setup

@@ -195,25 +195,25 @@ impl std::fmt::Display for StateApplyError {
         match self {
             StateApplyError::Overdrawn { asset, amount_overdrawn } => {
                 match asset {
-                    Some(asset) => write!(f, "Player needs {amount_overdrawn} more {asset} to perform this action"),
-                    None => write!(f, "Player needs {amount_overdrawn} more coins to perform this action")
+                    Some(asset) => write!(f, "Player needs {amount_overdrawn} more {asset} to perform this action."),
+                    None => write!(f, "Player needs {amount_overdrawn} more Coin(s) to perform this action.")
                 }
             }
             StateApplyError::UnauthorisedWithdrawl { asset, amount_overdrawn } => {
                 match amount_overdrawn {
-                    Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}"),
-                    None => write!(f, "Player needs authorisation to withdraw {asset}")
+                    Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}."),
+                    None => write!(f, "Player needs authorisation to withdraw {asset}.")
                 }
                 
             },
             StateApplyError::Overflow => {
-                write!(f, "The request was so messed up it could have overflowed!")
+                write!(f, "The request was so messed up it could have overflowed.")
             },
             StateApplyError::InvalidId { id } => {
-                write!(f, "The action ID {id} was invalid")
+                write!(f, "The action ID {id} was invalid.")
             },
             StateApplyError::AlreadyDone => {
-                write!(f, "This action has already been performed")
+                write!(f, "This action has already been performed.")
             }
         }
         
@@ -433,12 +433,12 @@ impl State {
                 // Now take the assets, as we've confirmed they can afford it
                 for (asset, count) in tracked_assets.iter() {
                     // Remove assets
-                    self.commit_asset_removal(&player, asset, *count).expect("Assets disappeared after check");
+                    self.commit_asset_removal(&player, asset, *count).expect("Assets disappeared after check.");
                     // Remove allowance if restricted
                     if self.is_restricted(asset) {
                         // TODO: Clean up after ourselves
-                        *self.authorisations.get_mut(&player).expect("Asset player disappeared after check")
-                                            .get_mut(asset).expect("Asset auth disappeared after check") -= count;
+                        *self.authorisations.get_mut(&player).expect("Asset player disappeared after check.")
+                                            .get_mut(asset).expect("Asset authentication disappeared after check.") -= count;
                     }
                 }
 
@@ -463,7 +463,7 @@ impl State {
                         else {break;};
                         // If we are out of buy orders, stop
                         let (buy_order, buy_order_id) = {
-                            let buy_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up");
+                            let buy_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up.");
                             if let Some(order) = self.orders.get_mut(&buy_id) {
                                 (order, buy_id)
                             }
@@ -480,7 +480,7 @@ impl State {
                                 // ... give the money ...
                                 *player_balance += buy_order.amount_remaining * buy_order.coins_per;
                                 // ... give the assets ...
-                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player").clone()).or_default().entry(asset.clone()).or_default() += buy_order.amount_remaining;
+                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player.").clone()).or_default().entry(asset.clone()).or_default() += buy_order.amount_remaining;
                                 // ... remove the amount ...
                                 amount_remaining -= buy_order.amount_remaining;
                                 // ... delete the buy order ...
@@ -496,7 +496,7 @@ impl State {
                                 // ... give the money ...
                                 *player_balance += buy_order.amount_remaining * buy_order.coins_per;
                                 // ... give the assets ...
-                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player").clone()).or_default().entry(asset.clone()).or_default() += buy_order.amount_remaining;
+                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player.").clone()).or_default().entry(asset.clone()).or_default() += buy_order.amount_remaining;
                                 // ... delete the buy order ...
                                 best_entry.get_mut().pop_front();
                                 self.orders.remove(&buy_order_id);
@@ -510,7 +510,7 @@ impl State {
                                 // ... give the money ...
                                 *player_balance += amount_remaining * buy_order.coins_per;
                                 // ... give the assets ...
-                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player").clone()).or_default().entry(asset.clone()).or_default() += amount_remaining;
+                                *self.assets.entry(buy_order.player.as_ref().expect("Buy order without player.").clone()).or_default().entry(asset.clone()).or_default() += amount_remaining;
                                 // ... reduce the buy order
                                 buy_order.amount_remaining -= amount_remaining;
                                 // We've fulfilled the whole sell order, so we can just return
@@ -543,7 +543,7 @@ impl State {
                         else {break;};
                         // If we are out of buy orders, stop
                         let (sell_order, sell_order_id) = {
-                            let sell_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up");
+                            let sell_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up.");
                             if let Some(order) = self.orders.get_mut(&sell_id) {
                                 (order, sell_id)
                             }
@@ -622,14 +622,14 @@ impl State {
                         // If we found it as a buy...
                         OrderType::Buy => {
                             // ... refund the money ...
-                            *self.balances.entry(found.player.expect("Buy order found without player")).or_default() += found.amount_remaining * found.coins_per;
+                            *self.balances.entry(found.player.expect("Buy order found without player.")).or_default() += found.amount_remaining * found.coins_per;
                             Ok(())
                         },
                         // If we found it as a sell...
                         OrderType::Sell => {
                             // ... refund the assets
                             *self.assets
-                                .entry(found.player.expect("Sell order cancelled without player")).or_default()
+                                .entry(found.player.expect("Sell order cancelled without player.")).or_default()
                                 .entry(found.asset).or_default() += found.amount_remaining * found.coins_per;
                             Ok(())
                         }
@@ -669,7 +669,7 @@ impl State {
                         else {break;};
                         // If we are out of buy orders, stop
                         let (buy_order, buy_order_id) = {
-                            let buy_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up");
+                            let buy_id = *best_entry.get_mut().front().expect("Empty best_buy not cleaned up.");
                             if let Some(order) = self.orders.get_mut(&buy_id) {
                                 (order, buy_id)
                             }
@@ -677,7 +677,7 @@ impl State {
                             else { continue; }
                         };
 
-                        let buyer = buy_order.player.as_ref().expect("Buy order without player").clone();
+                        let buyer = buy_order.player.as_ref().expect("Buy order without player.").clone();
                         let player_balance = self.balances.entry(buyer).or_default();
 
                         // We need to return funds, as this is likely below their price
@@ -780,15 +780,15 @@ impl State {
 
         let trade_file_reader = tokio::io::BufReader::new(trade_file);
         let mut trade_file_lines = trade_file_reader.lines();
-        while let Some(line) = trade_file_lines.next_line().await.expect("Could not read line from trade list") {
-            state.apply_inner(state.next_id, serde_json::from_str(&line).expect("Corrupted trade file"))?;
+        while let Some(line) = trade_file_lines.next_line().await.expect("Could not read line from trade list.") {
+            state.apply_inner(state.next_id, serde_json::from_str(&line).expect("Corrupted trade file."))?;
             state.next_id += 1;
         }
         Ok(state)
     }
     /// Atomically try to apply an action, and if successful, write to given stream
     pub async fn apply(&mut self, action: Action, out: &mut (impl tokio::io::AsyncWrite + std::marker::Unpin)) -> Result<u64, StateApplyError> {
-        let mut line = serde_json::to_string(&action).expect("Cannot serialise action");
+        let mut line = serde_json::to_string(&action).expect("Cannot serialise action.");
         line.push('\n');
         let id = self.next_id;
         match self.apply_inner(self.next_id, action).map(|()| {}) {

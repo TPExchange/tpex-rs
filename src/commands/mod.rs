@@ -15,10 +15,10 @@ impl Data {
     async fn get_lines(&mut self) -> Vec<u8> {
         // Keeping everything in the log file means we can't have different versions of the same data
         
-        self.trade_file.rewind().await.expect("Could not rewind trade file");
+        self.trade_file.rewind().await.expect("Could not rewind trade file.");
         let mut buf = Vec::new();
         // This will seek to the end again, so pos is the same before and after get_lines
-        self.trade_file.read_to_end(&mut buf).await.expect("Could not re-read trade file");
+        self.trade_file.read_to_end(&mut buf).await.expect("Could not re-read trade file.");
         buf
     }
     async fn run_action(&mut self, action: trade::Action) -> Result<u64, trade::StateApplyError> {
@@ -43,7 +43,7 @@ fn user_id(player: &PlayerId) -> Option<serenity::UserId> {
 #[poise::command(slash_command,ephemeral)]
 async fn balance(
     ctx: Context<'_>,
-    #[description = "Player (defaults to you)"]
+    #[description = "Player (Defaults to you)"]
     player: Option<serenity::User>,
 ) -> Result<(), Error> {
     let player = player.as_ref().unwrap_or(ctx.author());
@@ -51,7 +51,7 @@ async fn balance(
     let assets = ctx.data().read().await.state.get_assets(&player_id(player));
     ctx.send(
         poise::CreateReply::default()
-        .content(format!("{} has {} coins", player.name, bal))
+        .content(format!("{} has {} coins.", player.name, bal))
         .embed(
             serenity::CreateEmbed::new()
             .field("Name", assets.keys().join("\n"), true)
@@ -64,7 +64,7 @@ async fn balance(
 #[poise::command(slash_command,ephemeral)]
 async fn buycoins(
     ctx: Context<'_>,
-    #[description = "The number of diamonds you wish to exchange for coins"]
+    #[description = "The number of diamonds you wish to exchange for Coin(s)"]
     n_diamonds: u64,
 ) -> Result<(), Error> {
     let player = player_id(ctx.author());
@@ -105,7 +105,7 @@ fn list_assets(data: &Data, assets: &std::collections::BTreeMap<AssetId, u64>) -
         .field("Name", assets.keys().join("\n"), true)
         .field("Count", assets.values().join("\n"), true)
         .field("Restricted",  assets.keys().map(|x| data.state.is_restricted(x).to_string()).join("\n"), true)
-        .field("Fees", data.state.calc_withdrawal_fee(assets)?.to_string() + " coins", false)
+        .field("Fees", data.state.calc_withdrawal_fee(assets)?.to_string() + " Coin(s)", false)
     )
 }
 
