@@ -23,7 +23,7 @@ pub async fn raw(
     command: String,
 ) -> Result<(), Error> {
     let Ok(action) = serde_json::from_str(&command) else {
-        ctx.say("Invalid command!").await?;
+        ctx.say("Invalid command.").await?;
         return Ok(());
     };
     ctx.data().write().await.run_action(action).await?;
