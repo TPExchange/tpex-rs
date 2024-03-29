@@ -34,11 +34,10 @@ const DIAMOND_NAME: &str = "diamond";
 const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
     withdraw_flat: 1000,
     withdraw_per_stack: 40,
-    expedited: 1000,
+    expedited: 5000,
 };
-const DEFAULT_STACK: u64 = 64;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Action {
     /// Deleted transaction, for when someone does a bad
     Deleted {
@@ -143,11 +142,29 @@ pub enum Action {
     },
     UpdateBankers {
         bankers: Vec<PlayerId>
+    },
+    WithdrawProfit {
+        n_diamonds: u64,
+        banker: PlayerId
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum OrderType {
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct WrappedAction {
+    // The id of the action, which should equal the line number of the trades list
+    id: u64,
+    // The time this action was performed
+    time: chrono::DateTime<chrono::Utc>,
+    // The action itself
+    action: Action,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct AssetInfo {
+    stack_size: u64
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]pub enum OrderType {
     Buy,
     Sell
 }
@@ -188,7 +205,7 @@ pub enum StateApplyError {
     /// Some 1337 hacker tried an overflow attack >:(
     Overflow,
     InvalidId{id: u64},
-    AlreadyDone
+    UnknownAsset{asset: AssetId}
 }
 impl std::fmt::Display for StateApplyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -211,10 +228,10 @@ impl std::fmt::Display for StateApplyError {
             },
             StateApplyError::InvalidId { id } => {
                 write!(f, "The action ID {id} was invalid.")
-            },
-            StateApplyError::AlreadyDone => {
-                write!(f, "This action has already been performed.")
             }
+            StateApplyError::UnknownAsset { asset } => {
+                write!(f, "The item \"{asset}\" is not on our list")
+            },
         }
         
     }
@@ -230,7 +247,7 @@ struct UpdateBankPrices {
 #[derive(Debug)]
 pub struct State {
     next_id: u64,
-    stack_sizes: std::collections::HashMap<AssetId, u64>,
+    asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     fees: UpdateBankPrices,
 
     restricted_assets: std::collections::HashSet<AssetId>,
@@ -240,7 +257,9 @@ pub struct State {
 
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 
+    /// XXX: this contains cancelled orders, skip over them
     best_buy: std::collections::HashMap<AssetId, std::collections::BTreeMap<u64, std::collections::VecDeque<u64>>>,
+    /// XXX: this contains cancelled orders, skip over them
     best_sell: std::collections::HashMap<AssetId, std::collections::BTreeMap<u64, std::collections::VecDeque<u64>>>,
 
     balances: std::collections::HashMap<PlayerId, u64>,
@@ -249,6 +268,7 @@ pub struct State {
     pending_normal_withdrawals: std::collections::BTreeMap<u64, PendingWithdrawl>,
     pending_expedited_withdrawals: std::collections::BTreeMap<u64, PendingWithdrawl>,
 
+    profit: u64,
     earnings: std::collections::HashMap<PlayerId, u64>,
     bankers: std::collections::HashSet<PlayerId>
     // futures: std::collections::BTreeMap<i64, Action::Future>
@@ -263,9 +283,9 @@ impl State {
         self.assets.get(player).map_or_else(Default::default, Clone::clone)
     }
     /// Create a new empty state
-    pub fn new() -> State {
+    pub fn new(asset_info: std::collections::HashMap<AssetId, AssetInfo>) -> State {
         State{
-            stack_sizes: Default::default(),
+            asset_info,
             fees: INITIAL_BANK_PRICES,
             restricted_assets: Default::default(),
             orders: Default::default(),
@@ -277,15 +297,18 @@ impl State {
             pending_normal_withdrawals: Default::default(),
             pending_expedited_withdrawals: Default::default(),
             earnings: Default::default(),
-            next_id: 0,
-            bankers: Default::default()
+            // Start on ID 1 for nice mapping to line numbers
+            next_id: 1,
+            bankers: Default::default(),
+            profit: 0,
         }
     }
     /// Calculate the withdrawal fees
     pub fn calc_withdrawal_fee(&self, assets: &std::collections::BTreeMap<AssetId, u64>) -> Result<u64, StateApplyError> {
         let mut total_fee = self.fees.withdraw_flat;
         for (asset, count) in assets {
-            total_fee += count.div_ceil(*self.stack_sizes.get(asset).unwrap_or(&DEFAULT_STACK)).checked_mul(self.fees.withdraw_per_stack).ok_or(StateApplyError::Overflow)?;
+            total_fee += count.div_ceil(self.asset_info.get(asset).ok_or(StateApplyError::UnknownAsset{asset:asset.clone()})?.stack_size)
+                              .checked_mul(self.fees.withdraw_per_stack).ok_or(StateApplyError::Overflow)?;
         }
         Ok(total_fee)
     }
@@ -309,8 +332,44 @@ impl State {
     pub fn get_orders(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.orders.clone() }
     /// Get a specific order
     pub fn get_order(&self, id: u64) -> Option<PendingOrder> { self.orders.get(&id).cloned() }
+    /// Prices for an asset, returns (price, amount) in (buy, sell)
+    pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<u64, u64>, std::collections::BTreeMap<u64, u64>) {
+        let buy_levels = self.best_buy
+            .get(asset)
+            .iter()
+            .flat_map(|x| x.iter())
+            .filter_map(|(level, orders)| {
+                orders
+                    .iter()
+                    .cloned()
+                    .filter_map(|id| self.orders.get(&id).map(|x| x.amount_remaining))
+                    // We have None here iff there are no non-canceled orders
+                    .reduce(|a,b| a+b)
+                    .map(|amount| (*level, amount))
+            })
+            .collect();
+
+        let sell_levels = self.best_sell
+            .get(asset)
+            .iter()
+            .flat_map(|x| x.iter())
+            .filter_map(|(level, orders)| {
+                orders
+                    .iter()
+                    .cloned()
+                    .filter_map(|id| self.orders.get(&id).map(|x| x.amount_remaining))
+                    // We have None here iff there are no non-canceled orders
+                    .reduce(|a,b| a+b)
+                    .map(|amount| (*level, amount))
+            })
+            .collect();
+        
+        (buy_levels, sell_levels)
+    }
     /// Returns true if the given item is currently restricted
     pub fn is_restricted(&self, asset: &AssetId) -> bool { self.restricted_assets.contains(asset) }
+    /// Lists all restricted items
+    pub fn get_restricted(&self) -> impl Iterator<Item = &AssetId> { self.restricted_assets.iter() }
     /// Gets a list of all bankers
     pub fn get_bankers(&self) -> HashSet<PlayerId> { self.bankers.clone() }
     /// Returns true if the given player is an banker
@@ -586,8 +645,8 @@ impl State {
                             }
                             // If the buy order is more than enough...
                             std::cmp::Ordering::Greater => {
-                                // ... give the money ...
-                                *player_balance += amount_remaining * sell_order.coins_per;
+                                // ... give the assets ...
+                                *player_asset_count += amount_remaining;
                                 // ... if they bought it cheap, give them the difference ...
                                 *player_balance += amount_remaining * (coins_per - sell_order.coins_per);
                                 // ... reduce the sell order
@@ -614,6 +673,8 @@ impl State {
                 else { return Err(StateApplyError::InvalidId{id: target}); };
                 // Mark who delivered
                 *self.earnings.entry(banker).or_default() += res.total_fee;
+                // Add the profit
+                self.profit += res.total_fee;
                 Ok(())
             },
             Action::CancelOrder { target_id } => {
@@ -772,25 +833,38 @@ impl State {
                 self.bankers = std::collections::HashSet::from_iter(bankers);
                 Ok(())
             },
+            Action::WithdrawProfit { n_diamonds, .. } => {
+                self.profit -= n_diamonds * COINS_PER_DIAMOND;
+                Ok(())
+            }
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
-    pub async fn replay(trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin)) -> Result<State, StateApplyError> {
-        let mut state = Self::new();
+    pub async fn replay(trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin), asset_info: std::collections::HashMap<AssetId, AssetInfo>) -> Result<State, StateApplyError> {
+        let mut state = Self::new(asset_info);
 
         let trade_file_reader = tokio::io::BufReader::new(trade_file);
         let mut trade_file_lines = trade_file_reader.lines();
         while let Some(line) = trade_file_lines.next_line().await.expect("Could not read line from trade list.") {
-            state.apply_inner(state.next_id, serde_json::from_str(&line).expect("Corrupted trade file."))?;
+            let wrapped_action: WrappedAction = serde_json::from_str(&line).expect("Corrupted trade file.");
+            if wrapped_action.id != state.next_id {
+                panic!("Trade file ID mismatch: action {} found on line {}.", wrapped_action.id, state.next_id);
+            }
+            state.apply_inner(state.next_id, wrapped_action.action)?;
             state.next_id += 1;
         }
         Ok(state)
     }
     /// Atomically try to apply an action, and if successful, write to given stream
     pub async fn apply(&mut self, action: Action, out: &mut (impl tokio::io::AsyncWrite + std::marker::Unpin)) -> Result<u64, StateApplyError> {
-        let mut line = serde_json::to_string(&action).expect("Cannot serialise action.");
-        line.push('\n');
         let id = self.next_id;
+        let wrapped_action = WrappedAction {
+            id,
+            time: chrono::offset::Utc::now(),
+            action: action.clone(),
+        };
+        let mut line = serde_json::to_string(&wrapped_action).expect("Cannot serialise action");
+        line.push('\n');
         match self.apply_inner(self.next_id, action).map(|()| {}) {
             Ok(()) => {
                 self.next_id += 1;

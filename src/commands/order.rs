@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use poise::{serenity_prelude::{self as serenity, CreateEmbed, CreateInteractionResponseMessage}, CreateReply};
 
 use crate::{commands::player_id, trade::Action};
@@ -43,7 +44,7 @@ async fn buy(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Buy {amount} {item} for {coins_per} Coin(s) each (totalling {total})?"))
+            .description(format!("Buy {amount} {item} for {coins_per} Coin(s) each (totalling {total} Coin(s)?"))
         )
         .components(components)
     ).await?;
@@ -134,7 +135,7 @@ async fn sell(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Sell {amount} {item} for {coins_per} Coin(s) each (totalling {total})?"))
+            .description(format!("Sell {amount} {item} for {coins_per} Coin(s) each (totalling {total} Coin(s))?"))
         )
         .components(components)
     ).await?;
@@ -193,6 +194,23 @@ async fn price(ctx: Context<'_>,
     #[description = "The item you want to check the price for"] 
     item: String
 ) -> Result<(), Error> {
+    let (buy_levels, sell_levels) = ctx.data().read().await.state.get_prices(&item);
+    ctx.send(CreateReply::default()
+        .content(format!("Prices for {item}:"))
+        .embed(CreateEmbed::new()
+            .description("Buy levels")
+            .field("Amount", buy_levels.values().rev().join("\n"), true)
+            .field(" @ ", (0..buy_levels.len()).map(|_| "@").join("\n"), true)
+            .field("Coins per", buy_levels.keys().rev().join("\n"), true)
+        )
+        .embed(CreateEmbed::new()
+            .description("Sell levels")
+            .field("Amount", sell_levels.values().join("\n"), true)
+            .field(" @ ", (0..sell_levels.len()).map(|_| "@").join("\n"), true)
+            .field("Coins per", sell_levels.keys().join("\n"), true)
+        )
+    ).await?;
+
     Ok(())
 }
 /// Cancels an order

@@ -84,7 +84,6 @@ async fn sellcoins(
     ctx.reply("Purchase successful").await?;
     Ok(())
 }
-
 /// Get the machine-readable list of all transactions
 #[poise::command(slash_command,ephemeral)]
 async fn txlog(
@@ -95,6 +94,20 @@ async fn txlog(
 
     ctx.send(poise::CreateReply::default()
         .attachment(serenity::CreateAttachment::bytes(data, "trades.list"))
+    ).await?;
+    Ok(())
+}
+/// Get the list of items that require authorisation to withdraw
+#[poise::command(slash_command,ephemeral)]
+async fn restricted(ctx: Context<'_>) -> Result<(), Error> {
+    let assets = ctx.data().read().await.state.get_restricted().join("\n");
+    ctx.send(
+        poise::CreateReply::default()
+        .embed(
+            serenity::CreateEmbed::new()
+            .description("Restricted items:")
+            .field("Name", assets, true)
+        )
     ).await?;
     Ok(())
 }
@@ -115,6 +128,7 @@ pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<tokio::sync::RwLock<D
         buycoins(),
         sellcoins(),
         txlog(),
+        restricted(),
 
         withdraw::withdraw(),
         order::order(),
