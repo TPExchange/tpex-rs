@@ -2,7 +2,7 @@ mod withdraw;
 mod order;
 mod banker;
 
-use crate::trade::{self, AssetId, PlayerId, StateApplyError};
+use crate::trade::{self, AssetId, PlayerId};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -21,7 +21,7 @@ impl Data {
         self.trade_file.read_to_end(&mut buf).await.expect("Could not re-read trade file");
         buf
     }
-    async fn run_action(&mut self, action: trade::Action) -> Result<u64, trade::StateApplyError> {
+    async fn run_action(&mut self, action: trade::Action) -> Result<u64, trade::Error> {
         self.state.apply(action, &mut self.trade_file).await
     }
 }
@@ -121,7 +121,7 @@ async fn get_state(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-fn list_assets(data: &Data, assets: &std::collections::BTreeMap<AssetId, u64>) -> Result<CreateEmbed, StateApplyError> {
+fn list_assets(data: &Data, assets: &std::collections::HashMap<AssetId, u64>) -> Result<CreateEmbed, Error> {
     Ok(
         CreateEmbed::new()
         .field("Name", assets.keys().join("\n"), true)

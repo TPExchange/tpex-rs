@@ -162,7 +162,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
         ])
     ];
 
-    let basket = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::BTreeMap::new()));
+    let basket = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
     let ui = ctx.send(
         poise::CreateReply::default()
@@ -171,7 +171,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
             serenity::CreateEmbed::new()
             .field("Name", "", true)
             .field("Count", "", true)
-            .field("Fees", ctx.data().read().await.state.calc_withdrawal_fee(&std::collections::BTreeMap::new())?.to_string() + " coins", false)
+            .field("Fees", ctx.data().read().await.state.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + " coins", false)
         )
         .components(components)
     ).await?;
