@@ -126,8 +126,8 @@ pub enum Action {
     },
     // TODO: Not sure about these yet, let's see what demand we get
     // /// A futures contract is when someone promises to pay someone for assets in the future
-    // /// 
-    // /// In the case of a default: as much of the asset is moved into the player's account 
+    // ///
+    // /// In the case of a default: as much of the asset is moved into the player's account
     // Future {
     //     buyer: PlayerId,
     //     seller: Option<PlayerId>,
@@ -190,7 +190,7 @@ impl Action {
             Action::WithdrawlCompleted { .. } | // Completing a withdrawal takes items out
             Action::BuyCoins { .. } | // This turns one asset into another
             Action::SellCoins { .. } // This turns one asset into another
-                => false, 
+                => false,
             _ => true
         }
     }
@@ -266,7 +266,7 @@ pub struct AssetInfo {
 pub enum Error {
     Overdrawn{
         /// If None, then it's coins overdrawn
-        asset: Option<AssetId>, 
+        asset: Option<AssetId>,
         amount_overdrawn: u64
     },
     UnauthorisedWithdrawl{asset: AssetId, amount_overdrawn: Option<u64>},
@@ -293,7 +293,7 @@ impl std::fmt::Display for Error {
                     Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}"),
                     None => write!(f, "Player needs authorisation to withdraw {asset}")
                 }
-                
+
             },
             Error::Overflow => {
                 write!(f, "The request was so messed up it could have overflowed!")
@@ -317,7 +317,7 @@ impl std::fmt::Display for Error {
                 write!(f, "The requested action is redundant")
             }
         }
-        
+
     }
 }
 impl std::error::Error for Error {}
@@ -423,7 +423,7 @@ impl State {
         }
         self.balance.commit_coin_add(&PlayerId::the_bank(), amount - total_distributed);
     }
-    // Atomic (but not parallelisable!). 
+    // Atomic (but not parallelisable!).
     // This means the function will change significant things (i.e. more than just creating empty lists) IF AND ONLY IF it fully succeeds.
     // As such, we don't have to worry about giving it bad actions
     fn apply_inner(&mut self, id: u64, action: Action) -> Result<(), Error> {
@@ -488,7 +488,7 @@ impl State {
                 }
                 // Transfer the money
                 self.balance.commit_coin_add(&player, res.coins_instant_earned);
-                
+
                 Ok(())
             },
             Action::BuyOrder { player, asset, count, coins_per } => {
@@ -506,7 +506,7 @@ impl State {
                 if res.assets_instant_matched > 0 {
                     self.balance.commit_asset_add(&player, &asset, res.assets_instant_matched);
                 }
-                
+
                 Ok(())
             },
             Action::WithdrawlCompleted { target, banker } => {
@@ -628,7 +628,7 @@ impl State {
                 self.balance.commit_coin_removal(&player, count).expect("Unable to commit coin removal after check");
                 // Distribute the fee
                 self.distribute_profit(&to, fee);
-                
+
                 // Give the assets
                 self.balance.commit_asset_add(&player, &to, count);
 

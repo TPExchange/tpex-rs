@@ -10,7 +10,7 @@ pub async fn order(_ctx: Context<'_>) -> Result<(), Error> { panic!("order metac
 
 /// Places a buy order
 #[poise::command(slash_command, ephemeral)]
-async fn buy(ctx: Context<'_>, 
+async fn buy(ctx: Context<'_>,
     #[description = "The item you want to place a buy order for"]
     item: String,
     #[description = "The amount you want to order"]
@@ -100,7 +100,7 @@ async fn buy(ctx: Context<'_>,
 
 /// Places a sell order
 #[poise::command(slash_command, ephemeral)]
-async fn sell(ctx: Context<'_>, 
+async fn sell(ctx: Context<'_>,
     #[description = "The item you want to place a sell order for"]
     item: String,
     #[description = "The amount you want to order"]
@@ -190,7 +190,7 @@ async fn sell(ctx: Context<'_>,
 
 #[poise::command(slash_command, ephemeral)]
 async fn price(ctx: Context<'_>,
-    #[description = "The item you want to check the price for"] 
+    #[description = "The item you want to check the price for"]
     item: String
 ) -> Result<(), Error> {
     let (buy_levels, sell_levels) = ctx.data().read().await.state.get_prices(&item);
@@ -215,7 +215,7 @@ async fn price(ctx: Context<'_>,
 /// Cancels an order
 #[poise::command(slash_command, ephemeral)]
 async fn cancel(ctx: Context<'_>,
-    #[description = "The id for the order"] 
+    #[description = "The id for the order"]
     id: u64
 ) -> Result<(), Error> {
     let Some(order) = ctx.data().read().await.state.get_order(id)
@@ -268,7 +268,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             match (lower_range.next(), upper_range.next()) {
                 (Some(closest), None) =>
                     ((lower_range.next().map(|i| i.0), *closest.0, None), closest.1),
-                (None, Some(closest)) => 
+                (None, Some(closest)) =>
                     ((None, *closest.0, upper_range.next().map(|i| i.0)), closest.1),
                 (Some(lower), Some(upper)) => {
                     if curr_id.abs_diff(*lower.0) < curr_id.abs_diff(*upper.0) {

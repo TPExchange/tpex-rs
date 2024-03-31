@@ -98,7 +98,7 @@ pub async fn pay(
         let id = data.run_action(Action::WithdrawlRequested { player: PlayerId::the_bank(), assets: vec![(crate::trade::DIAMOND_NAME.to_owned(), n_diamonds)].into_iter().collect() }).await?;
         data.run_action(Action::WithdrawlCompleted { target: id, banker }).await?;
     }
-    
+
     ctx.reply("Profits taken").await?;
     Ok(())
 }
@@ -111,7 +111,7 @@ pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
         ctx.reply("No withdrawals left").await?;
         return Ok(());
     };
-    
+
     ctx.send(
         CreateReply::default()
         .embed(list_assets(ctx.data().read().await.deref(), &current.assets)?)

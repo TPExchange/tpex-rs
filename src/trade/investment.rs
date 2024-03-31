@@ -51,7 +51,7 @@ impl InvestmentTracker {
                     asset_investment_list.remove();
                 }
             }
-            None => { 
+            None => {
                 return Err(Error::Overdrawn { asset: Some(asset.clone()), amount_overdrawn: count - asset_count.get() })
             },
             Some(count) => {
@@ -96,7 +96,7 @@ impl Auditable for InvestmentTracker {
         let asset_recalc: std::collections::HashMap<AssetId, u64> = self.asset_investments.iter()
             .map(|(asset, tab)| (asset.clone(),tab.values().sum())).collect();
         let player_recalc: std::collections::HashMap<AssetId, u64> = self.player_investments.values()
-            .fold(Default::default(), |mut a, b| { 
+            .fold(Default::default(), |mut a, b| {
                 b.iter().for_each(|(asset, count)| {
                     *a.entry(asset.clone()).or_default() += count;
                 });
@@ -109,7 +109,7 @@ impl Auditable for InvestmentTracker {
         let mut total_invested = player_recalc;
         // Now add what has been promised
         self.investment_confirmed.values()
-            .for_each(|b| { 
+            .for_each(|b| {
                 b.iter().for_each(|(asset, count)| {
                     *total_invested.entry(asset.clone()).or_default() += count;
                 });

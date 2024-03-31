@@ -93,7 +93,7 @@ impl OrderTracker {
                     .map(|amount| (*level, amount))
             })
             .collect();
-        
+
         (buy_levels, sell_levels)
     }
 
@@ -125,7 +125,7 @@ impl OrderTracker {
                 }
             }
         }
-        (amount_remaining, ret)        
+        (amount_remaining, ret)
     }
     fn iterate_best_buy<'a>(&'a self, asset: &'a AssetId, limit: u64) -> impl Iterator<Item = u64> + 'a {
         // Get all assets...
@@ -133,7 +133,7 @@ impl OrderTracker {
             // ... only look at the asset in question ...
             .get(asset)
             .into_iter()
-            // ... write out all the levels in order ... 
+            // ... write out all the levels in order ...
             .flat_map(|i| i.iter())
             // ... put price points in descending order ...
             .rev()
@@ -148,7 +148,7 @@ impl OrderTracker {
             // ... only look at the asset in question ...
             .get(asset)
             .into_iter()
-            // ... write out all the levels in order ... 
+            // ... write out all the levels in order ...
             .flat_map(|i| i.iter())
             // ... price points are already in ascending order ...
             // ... only look at offers below the limit ...

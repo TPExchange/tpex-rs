@@ -14,7 +14,7 @@ pub struct Data {
 impl Data {
     async fn get_lines(&mut self) -> Vec<u8> {
         // Keeping everything in the log file means we can't have different versions of the same data
-        
+
         self.trade_file.rewind().await.expect("Could not rewind trade file");
         let mut buf = Vec::new();
         // This will seek to the end again, so pos is the same before and after get_lines
@@ -30,11 +30,11 @@ pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 pub(crate) type WrappedData = std::sync::Arc<tokio::sync::RwLock<Data>>;
 type Context<'a> = poise::Context<'a, WrappedData, Error>;
 
-fn player_id(user: &serenity::User) -> PlayerId { 
+fn player_id(user: &serenity::User) -> PlayerId {
     #[allow(deprecated)]
-    PlayerId::evil_constructor(user.id.to_string()) 
+    PlayerId::evil_constructor(user.id.to_string())
 }
-fn user_id(player: &PlayerId) -> Option<serenity::UserId> { 
+fn user_id(player: &PlayerId) -> Option<serenity::UserId> {
     #[allow(deprecated)]
     PlayerId::evil_deref(player).parse().ok()
 }
@@ -116,7 +116,7 @@ async fn restricted(ctx: Context<'_>) -> Result<(), Error> {
 async fn get_state(ctx: Context<'_>) -> Result<(), Error> {
     let state = serde_json::to_string(&ctx.data().read().await.state)?;
     ctx.send(poise::CreateReply::default()
-        .attachment(serenity::CreateAttachment::bytes(state, "state.json"))    
+        .attachment(serenity::CreateAttachment::bytes(state, "state.json"))
     ).await?;
     Ok(())
 }

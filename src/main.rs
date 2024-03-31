@@ -28,7 +28,7 @@ async fn main() {
     let mut client = {
         let data = std::sync::Arc::new(tokio::sync::RwLock::new(commands::Data{state, trade_file}));
         let intents = serenity::GatewayIntents::non_privileged();
-    
+
         let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions::<commands::WrappedData, commands::Error> {
             commands: commands::get_commands(),
@@ -41,7 +41,7 @@ async fn main() {
             })
         })
         .build();
-    
+
         serenity::ClientBuilder::new(token, intents)
             .framework(framework)
             .await

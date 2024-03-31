@@ -19,7 +19,7 @@ impl WithdrawalTracker {
     /// List all expedited
     pub fn get_expedited_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> { self.pending_expedited_withdrawals.clone() }
     /// List all withdrawals
-    pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> { 
+    pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> {
         let mut ret = self.pending_normal_withdrawals.clone();
         ret.extend(self.get_expedited_withdrawals());
         ret
