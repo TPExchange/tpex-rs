@@ -89,15 +89,10 @@ pub async fn complete(
 pub async fn pay(
     ctx: Context<'_>,
     #[description = "The ID of the deposit to complete"]
-    n_diamonds: u64
+    coins: u64
 ) -> Result<(), Error> {
     let banker = player_id(ctx.author());
-    {
-        // Lock the data to make this run back to back
-        let mut data = ctx.data().write().await;
-        let id = data.run_action(Action::WithdrawlRequested { player: PlayerId::the_bank(), assets: vec![(crate::trade::DIAMOND_NAME.to_owned(), n_diamonds)].into_iter().collect() }).await?;
-        data.run_action(Action::WithdrawlCompleted { target: id, banker }).await?;
-    }
+    ctx.data().write().await.run_action(Action::TransferCoins { payer: PlayerId::the_bank(), payee: banker, count: coins }).await?;
 
     ctx.reply("Profits taken").await?;
     Ok(())
