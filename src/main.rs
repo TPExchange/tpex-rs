@@ -11,11 +11,11 @@ async fn main() {
     // let mut db = self::db::DatabaseConnection::new(std::env::var("DATABASE_URL").expect("missing DATABASE_URL")).await.expect("Failed to init database");
 
     let argv: Vec<_> = std::env::args().collect();
-    let path: &str = &argv[1];
-    let asset_path: &str = &argv[2];
+    let asset_path: &str = argv.get(1).expect("Missing asset path as first argument");
+    let trades_path: &str = argv.get(2).expect("Missing trades path as second argument");
     let mut assets = String::new();
     tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
-    let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(path).await.expect("Unable to open trade list");
+    let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(trades_path).await.expect("Unable to open trade list");
     let state = trade::State::replay(&mut trade_file, serde_json::from_str(&assets).expect("Unable to parse asset info")).await.expect("Could not replay trades");
 
     let Ok(token) = std::env::var("DISCORD_TOKEN")
