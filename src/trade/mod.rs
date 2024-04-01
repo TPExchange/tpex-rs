@@ -69,7 +69,7 @@ pub enum Action {
     Expedited {
         target: u64
     },
-    /// Player asked to withdrew assets
+    /// Player asked to withdraw assets
     WithdrawlRequested {
         player: PlayerId,
         assets: std::collections::HashMap<AssetId,u64>
@@ -90,13 +90,17 @@ pub enum Action {
         n_diamonds: u64,
     },
     /// Player offers to buy assets at a price, and locks money away until cancelled
+    ///
+    /// Instant matches should favour the buyer
     BuyOrder {
         player: PlayerId,
         asset: AssetId,
         count: u64,
         coins_per: u64,
     },
-    /// Player offers to sell assets at a price
+    /// Player offers to sell assets at a price, and locks away assets until cancelled
+    ///
+    /// Instant matches should favour the seller
     SellOrder {
         player: PlayerId,
         asset: AssetId,
@@ -108,15 +112,18 @@ pub enum Action {
     //     count: u64,
     //     banker: PlayerId,
     // },
+    /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
         restricted_assets: Vec<AssetId>
     },
+    /// Allows a player to place new withdrawal requests up to new_count of an item
     AuthoriseRestricted {
         authorisee: PlayerId,
-        authoriser: PlayerId,
+        banker: PlayerId,
         asset: AssetId,
         new_count: u64
     },
+    /// Changes the fees
     UpdateBankPrices {
         withdraw_flat: u64,
         withdraw_per_stack: u64,
@@ -141,41 +148,48 @@ pub enum Action {
     // Defaulted {
 
     // }
-    // A transfer of coins from one player to another, no strings attached
+    /// A transfer of coins from one player to another, no strings attached
     TransferCoins {
         payer: PlayerId,
         payee: PlayerId,
         count: u64
     },
-    // A transfer of items from one player to another, no strings attached
+    /// A transfer of items from one player to another, no strings attached
     TransferAsset {
         payer: PlayerId,
         payee: PlayerId,
         asset: AssetId,
         count: u64
     },
+    /// Cancel the remaining assets and coins in a buy or sell order
     CancelOrder {
         target_id: u64
     },
+    /// Update the list of bankers to the given list
     UpdateBankers {
         bankers: Vec<PlayerId>
     },
+    /// Update the list of investable assets to the given list
     UpdateInvestables {
         assets: Vec<AssetId>
     },
+    /// Lock away assets for use by the bank, with the hope of profit
     Invest {
         player: PlayerId,
         asset: AssetId,
         count: u64
     },
+    /// Stop the given assets from being locked away, but should fail if they're currently in use
     Uninvest {
         player: PlayerId,
         asset: AssetId,
         count: u64
     },
+    /// Update the list of items that the bank is willing to convert
     UpdateConvertables {
         convertables: Vec<(AssetId, AssetId)>
     },
+    /// Give a player access to invested items, and lock away the items needed to replenish the invested stock
     InstantConvert {
         player: PlayerId,
         from: AssetId,
@@ -608,6 +622,7 @@ impl State {
                 Ok(())
             },
             Action::InstantConvert { from, to, count, player } => {
+                // BUG: will fail audit
                 // Check convertable
                 if self.convertables.contains(&(from.clone(), to.clone())) {
                     return Err(Error::NotConvertable { from, to });

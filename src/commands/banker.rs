@@ -125,6 +125,6 @@ pub async fn authorise(ctx: Context<'_>,
     #[description = "The new amount of that asset to be authorised"]
     new_count: u64
 ) -> Result<(), Error> {
-    ctx.data().write().await.run_action(Action::AuthoriseRestricted { authorisee: player_id(&player), authoriser: player_id(ctx.author()), asset, new_count }).await?;
+    ctx.data().write().await.run_action(Action::AuthoriseRestricted { authorisee: player_id(&player), banker: player_id(ctx.author()), asset, new_count }).await?;
     Ok(())
 }
