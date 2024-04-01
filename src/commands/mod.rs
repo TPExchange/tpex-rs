@@ -2,7 +2,7 @@ mod withdraw;
 mod order;
 mod banker;
 
-use crate::trade::{self, AssetId, PlayerId, StateApplyError};
+use crate::trade::{self, AssetId, PlayerId};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -14,14 +14,13 @@ pub struct Data {
 impl Data {
     async fn get_lines(&mut self) -> Vec<u8> {
         // Keeping everything in the log file means we can't have different versions of the same data
-        
         self.trade_file.rewind().await.expect("Could not rewind trade file.");
         let mut buf = Vec::new();
         // This will seek to the end again, so pos is the same before and after get_lines
         self.trade_file.read_to_end(&mut buf).await.expect("Could not re-read trade file.");
         buf
     }
-    async fn run_action(&mut self, action: trade::Action) -> Result<u64, trade::StateApplyError> {
+    async fn run_action(&mut self, action: trade::Action) -> Result<u64, trade::Error> {
         self.state.apply(action, &mut self.trade_file).await
     }
 }
@@ -30,11 +29,11 @@ pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 pub(crate) type WrappedData = std::sync::Arc<tokio::sync::RwLock<Data>>;
 type Context<'a> = poise::Context<'a, WrappedData, Error>;
 
-fn player_id(user: &serenity::User) -> PlayerId { 
+fn player_id(user: &serenity::User) -> PlayerId {
     #[allow(deprecated)]
-    PlayerId::evil_constructor(user.id.to_string()) 
+    PlayerId::evil_constructor(user.id.to_string())
 }
-fn user_id(player: &PlayerId) -> Option<serenity::UserId> { 
+fn user_id(player: &PlayerId) -> Option<serenity::UserId> {
     #[allow(deprecated)]
     PlayerId::evil_deref(player).parse().ok()
 }
@@ -111,8 +110,17 @@ async fn restricted(ctx: Context<'_>) -> Result<(), Error> {
     ).await?;
     Ok(())
 }
+/// For lazy people who can't be bothered to write a verifier :(
+#[poise::command(slash_command,ephemeral)]
+async fn get_state(ctx: Context<'_>) -> Result<(), Error> {
+    let state = serde_json::to_string(&ctx.data().read().await.state)?;
+    ctx.send(poise::CreateReply::default()
+        .attachment(serenity::CreateAttachment::bytes(state, "state.json"))
+    ).await?;
+    Ok(())
+}
 
-fn list_assets(data: &Data, assets: &std::collections::BTreeMap<AssetId, u64>) -> Result<CreateEmbed, StateApplyError> {
+fn list_assets(data: &Data, assets: &std::collections::HashMap<AssetId, u64>) -> Result<CreateEmbed, Error> {
     Ok(
         CreateEmbed::new()
         .field("Name", assets.keys().join("\n"), true)

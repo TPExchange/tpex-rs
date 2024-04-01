@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 use poise::{serenity_prelude::{self as serenity, Mentionable}, CreateReply};
 
-use crate::{commands::{list_assets, user_id}, trade::Action};
+use crate::{commands::{list_assets, user_id}, trade::{Action, PlayerId}};
 
 use super::{player_id, Context, Error};
 // Commands that handle withdrawals
@@ -44,8 +44,30 @@ pub async fn deposit(
 ) -> Result<(), Error> {
     let player = player_id(&player);
     let banker = player_id(ctx.author());
+    let response = format!("Deposited {count} {asset} for {player}.");
     ctx.data().write().await.run_action(Action::Deposit { player, asset, count, banker }).await?;
-    ctx.reply("Deposit succeeded!").await?;
+    ctx.reply(response).await?;
+    Ok(())
+}
+
+/// Mark resources as deposited for the bank
+#[poise::command(slash_command,ephemeral, check = check)]
+pub async fn reserve(
+    ctx: Context<'_>,
+    #[description = "The asset to be added to the reserve"]
+    asset: String,
+    #[description = "The amount of that asset to be added"]
+    count: u64
+) -> Result<(), Error> {
+    let banker = player_id(ctx.author());
+    let response = format!("Added {count} {asset} to the reserve.");
+    // Do these back to back
+    {
+        let mut data = ctx.data().write().await;
+        data.run_action(Action::Deposit { player: PlayerId::the_bank(), asset: asset.clone(), count, banker }).await?;
+        data.run_action(Action::Invest { player: PlayerId::the_bank(), asset, count }).await.expect("Unable to invest from bank");
+    }
+    ctx.reply(response).await?;
     Ok(())
 }
 
@@ -70,7 +92,13 @@ pub async fn pay(
     n_diamonds: u64
 ) -> Result<(), Error> {
     let banker = player_id(ctx.author());
-    ctx.data().write().await.run_action(Action::WithdrawProfit { n_diamonds, banker }).await?;
+    {
+        // Lock the data to make this run back to back
+        let mut data = ctx.data().write().await;
+        let id = data.run_action(Action::WithdrawlRequested { player: PlayerId::the_bank(), assets: vec![(crate::trade::DIAMOND_NAME.to_owned(), n_diamonds)].into_iter().collect() }).await?;
+        data.run_action(Action::WithdrawlCompleted { target: id, banker }).await?;
+    }
+
     ctx.reply("Profits taken").await?;
     Ok(())
 }
@@ -83,7 +111,7 @@ pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
         ctx.reply("No withdrawals left.").await?;
         return Ok(());
     };
-    
+
     ctx.send(
         CreateReply::default()
         .embed(list_assets(ctx.data().read().await.deref(), &current.assets)?)

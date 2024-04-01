@@ -51,7 +51,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             match (lower_range.next(), upper_range.next()) {
                 (Some(closest), None) =>
                     ((lower_range.next().map(|i| i.0), *closest.0, None), closest.1),
-                (None, Some(closest)) => 
+                (None, Some(closest)) =>
                     ((None, *closest.0, upper_range.next().map(|i| i.0)), closest.1),
                 (Some(lower), Some(upper)) => {
                     if curr_id.abs_diff(*lower.0) < curr_id.abs_diff(*upper.0) {
@@ -99,12 +99,12 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             x if x == &expedite_button_id => {
                 // Check to make sure the user is aware this isn't free
                 let fee = ctx.data().read().await.state.expedite_fee().to_string();
-                
+
                 // Because discord doesn't bother to tell us if the use canceled, this must be done as a task
                 let serenity_ctx = ctx.serenity_context().clone();
                 let data = ctx.data().clone();
                 tokio::spawn(async move {
-                    let Some(check_modal) = mci.quick_modal(&serenity_ctx, 
+                    let Some(check_modal) = mci.quick_modal(&serenity_ctx,
                         serenity::CreateQuickModal::new("Are you sure?")
                         .short_field(format!("Type \"{fee}\" (The fee you will pay):"))).await?
                     else {
@@ -162,7 +162,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
         ])
     ];
 
-    let basket = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::BTreeMap::new()));
+    let basket = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
     let ui = ctx.send(
         poise::CreateReply::default()
@@ -171,7 +171,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
             serenity::CreateEmbed::new()
             .field("Name", "", true)
             .field("Count", "", true)
-            .field("Fees", ctx.data().read().await.state.calc_withdrawal_fee(&std::collections::BTreeMap::new())?.to_string() + " Coin(s)", false)
+            .field("Fees", ctx.data().read().await.state.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + " coin(s)", false)
         )
         .components(components)
     ).await?;
@@ -212,7 +212,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                 let serenity_ctx = ctx.serenity_context().clone();
                 let player = player_id(ctx.author());
                 tokio::spawn(async move {
-                    let Some(check_modal) = mci.quick_modal(&serenity_ctx, 
+                    let Some(check_modal) = mci.quick_modal(&serenity_ctx,
                         serenity::CreateQuickModal::new("Are you sure?")
                         .short_field(format!("Type \"{fee}\" (The fee you will pay):"))).await?
                     else {
@@ -243,7 +243,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                     Ok(())
                 });
 
-                
+
             },
             x if x == &set_id => {
                 // Because discord doesn't bother to tell us if the use canceled, this must be done as a task

@@ -1,0 +1,6 @@
+/target
+.vscode
+trades.list
+Cargo.lock
+Dockerfile
+.dockerignore
