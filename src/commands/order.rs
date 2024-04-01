@@ -44,7 +44,7 @@ async fn buy(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Buy {amount} {item} for {coins_per} coins each (totalling {total} coins)?"))
+            .description(format!("Buy {amount} {item} for {coins_per} Coin(s) each (totalling {total} Coin(s)?"))
         )
         .components(components)
     ).await?;
@@ -105,7 +105,7 @@ async fn sell(ctx: Context<'_>,
     item: String,
     #[description = "The amount you want to order"]
     amount: u64,
-    #[description = "The coins you want to get per item"]
+    #[description = "The Coin(s) you want to get per item"]
     coins_per: u64
 ) -> Result<(), Error> {
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
@@ -115,6 +115,7 @@ async fn sell(ctx: Context<'_>,
     let total = coins_per * amount;
     let ctx_id = ctx.id();
     let ctx_suffix = format!("_{ctx_id}");
+
     let sell_id = format!("sell{ctx_suffix}");
     let cancel_id = format!("cancel{ctx_suffix}");
 
@@ -134,7 +135,7 @@ async fn sell(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Sell {amount} {item} for {coins_per} coins each (totalling {total} coins)?"))
+            .description(format!("Sell {amount} {item} for {coins_per} Coin(s) each (totalling {total} Coin(s))?"))
         )
         .components(components)
     ).await?;

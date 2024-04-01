@@ -284,14 +284,14 @@ impl std::fmt::Display for Error {
         match self {
             Error::Overdrawn { asset, amount_overdrawn } => {
                 match asset {
-                    Some(asset) => write!(f, "Player needs {amount_overdrawn} more {asset} to perform this action"),
-                    None => write!(f, "Player needs {amount_overdrawn} more coins to perform this action")
+                    Some(asset) => write!(f, "Player needs {amount_overdrawn} more {asset} to perform this action."),
+                    None => write!(f, "Player needs {amount_overdrawn} more coins to perform this action.")
                 }
             }
             Error::UnauthorisedWithdrawl { asset, amount_overdrawn } => {
                 match amount_overdrawn {
-                    Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}"),
-                    None => write!(f, "Player needs authorisation to withdraw {asset}")
+                    Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}."),
+                    None => write!(f, "Player needs authorisation to withdraw {asset}.")
                 }
 
             },
@@ -299,22 +299,22 @@ impl std::fmt::Display for Error {
                 write!(f, "The request was so messed up it could have overflowed!")
             },
             Error::InvalidId { id } => {
-                write!(f, "The action ID {id} was invalid")
+                write!(f, "The action ID {id} was invalid.")
             }
             Error::UnknownAsset { asset } => {
-                write!(f, "The item \"{asset}\" is not on our list")
+                write!(f, "The item \"{asset}\" is not on our list.")
             },
             Error::NotInvestable { asset } => {
-                write!(f, "The item \"{asset}\" is not investable yet")
+                write!(f, "The item \"{asset}\" is not investable yet.")
             },
             Error::InvestmentBusy { asset, amount_over} => {
-                write!(f, "The action failed, as we would need {amount_over} more invested {asset}")
+                write!(f, "The action failed, as we would need {amount_over} more invested {asset}.")
             },
             Error::NotConvertable { from, to } => {
-                write!(f, "We do not currently offer conversion from {from} to {to}")
+                write!(f, "We do not currently offer conversion from {from} to {to}.")
             },
             Error::AlreadyDone => {
-                write!(f, "The requested action is redundant")
+                write!(f, "The requested action is redundant.")
             }
         }
 

@@ -9,7 +9,7 @@ use crate::{commands::{list_assets, user_id}, trade::{Action, PlayerId}};
 use super::{player_id, Context, Error};
 // Commands that handle withdrawals
 #[poise::command(slash_command, ephemeral, subcommands("raw", "deposit", "complete", "current", "authorise"), check = check)]
-pub async fn banker(_ctx: Context<'_>) -> Result<(), Error> { panic!("banker metacommand called!"); }
+pub async fn banker(_ctx: Context<'_>) -> Result<(), Error> { panic!("Banker metacommand called."); }
 
 async fn check(ctx: Context<'_>) -> Result<bool, Error> {
     Ok(ctx.data().read().await.state.is_banker(&player_id(ctx.author())))
@@ -23,11 +23,11 @@ pub async fn raw(
     command: String,
 ) -> Result<(), Error> {
     let Ok(action) = serde_json::from_str(&command) else {
-        ctx.say("Invalid command").await?;
+        ctx.say("Invalid command.").await?;
         return Ok(());
     };
     ctx.data().write().await.run_action(action).await?;
-    ctx.reply("Action succeeded").await?;
+    ctx.reply("Action succeeded!").await?;
     Ok(())
 }
 
@@ -44,7 +44,7 @@ pub async fn deposit(
 ) -> Result<(), Error> {
     let player = player_id(&player);
     let banker = player_id(ctx.author());
-    let response = format!("Deposited {count} {asset} for {player}");
+    let response = format!("Deposited {count} {asset} for {player}.");
     ctx.data().write().await.run_action(Action::Deposit { player, asset, count, banker }).await?;
     ctx.reply(response).await?;
     Ok(())
@@ -60,7 +60,7 @@ pub async fn reserve(
     count: u64
 ) -> Result<(), Error> {
     let banker = player_id(ctx.author());
-    let response = format!("Added {count} {asset} to the reserve");
+    let response = format!("Added {count} {asset} to the reserve.");
     // Do these back to back
     {
         let mut data = ctx.data().write().await;
@@ -80,7 +80,7 @@ pub async fn complete(
 ) -> Result<(), Error> {
     let banker = player_id(ctx.author());
     ctx.data().write().await.run_action(Action::WithdrawlCompleted { target: withdrawal_id, banker }).await?;
-    ctx.reply("Withdrawal completion succeeded").await?;
+    ctx.reply("Withdrawal completion succeeded.").await?;
     Ok(())
 }
 
@@ -108,14 +108,14 @@ pub async fn pay(
 pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
     let Some(current) = ctx.data().read().await.state.get_next_withdrawal()
     else {
-        ctx.reply("No withdrawals left").await?;
+        ctx.reply("No withdrawals left.").await?;
         return Ok(());
     };
 
     ctx.send(
         CreateReply::default()
         .embed(list_assets(ctx.data().read().await.deref(), &current.assets)?)
-        .content(format!("Deliver to {}", user_id(&current.player).expect("Invalid player id").mention()))
+        .content(format!("Deliver to {}", user_id(&current.player).expect("Invalid player ID").mention()))
     ).await?;
     Ok(())
 }

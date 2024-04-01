@@ -63,7 +63,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
                 },
                 (None, None) => {
                     // All withdrawals have completed, we have nothing left
-                    ui.edit(ctx, CreateReply::default().content("No withdrawals left")).await?;
+                    ui.edit(ctx, CreateReply::default().content("No withdrawals left.")).await?;
                     return Ok(());
                 }
             }
@@ -106,7 +106,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
                 tokio::spawn(async move {
                     let Some(check_modal) = mci.quick_modal(&serenity_ctx,
                         serenity::CreateQuickModal::new("Are you sure?")
-                        .short_field(format!("Type \"{fee}\" (the fee you will pay):"))).await?
+                        .short_field(format!("Type \"{fee}\" (The fee you will pay):"))).await?
                     else {
                         return Ok::<(), Error>(())
                     };
@@ -120,8 +120,8 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
                     //
                     // TODO: parallelise
                     for id in data.read().await.state.get_bankers() {
-                        let user = user_id(&id).expect("Unable to parse banker id").to_user(&serenity_ctx.http).await.expect("Unable to contact banker");
-                        user.dm(&serenity_ctx, CreateMessage::new().content("New expedited order!")).await.expect("Unable to dm banker");
+                        let user = user_id(&id).expect("Unable to parse banker ID").to_user(&serenity_ctx.http).await.expect("Unable to contact banker.");
+                        user.dm(&serenity_ctx, CreateMessage::new().content("New expedited order!")).await.expect("Unable to DM banker.");
                     }
                     Ok(())
                 });
@@ -171,7 +171,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
             serenity::CreateEmbed::new()
             .field("Name", "", true)
             .field("Count", "", true)
-            .field("Fees", ctx.data().read().await.state.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + " coins", false)
+            .field("Fees", ctx.data().read().await.state.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + " coin(s)", false)
         )
         .components(components)
     ).await?;
@@ -214,7 +214,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                 tokio::spawn(async move {
                     let Some(check_modal) = mci.quick_modal(&serenity_ctx,
                         serenity::CreateQuickModal::new("Are you sure?")
-                        .short_field(format!("Type \"{fee}\" (the fee you will pay):"))).await?
+                        .short_field(format!("Type \"{fee}\" (The fee you will pay):"))).await?
                     else {
                         // ctx.say("Withdrawl canceled!").await?;
                         return Ok::<(), Error>(())
