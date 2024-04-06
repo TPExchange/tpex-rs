@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 
-use crate::{commands::{list_assets, player_id, user_id}, trade::Action};
+use crate::commands::{list_assets, player_id, user_id};
+use tpex::Action;
 use poise::{serenity_prelude::{self as serenity, CreateInteractionResponseMessage, CreateMessage}, CreateReply};
 
 use super::{Context, Error};

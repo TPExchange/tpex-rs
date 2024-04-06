@@ -43,7 +43,7 @@ pub enum CancelResult {
     SellOrder{player: PlayerId, refunded_asset: AssetId, refund_count: u64}
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Clone)]
 pub struct OrderTracker {
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 

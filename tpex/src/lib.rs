@@ -26,9 +26,9 @@ const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
 pub struct PlayerId(String);
 impl PlayerId {
     #[deprecated = "Do not use this, use player_id instead"]
-    pub(crate) fn evil_constructor(s: String) -> PlayerId { PlayerId(s) }
+    pub fn evil_constructor(s: String) -> PlayerId { PlayerId(s) }
     #[deprecated = "Do not use this, use user_id instead"]
-    pub(crate) fn evil_deref(&self) -> &String { &self.0 }
+    pub fn evil_deref(&self) -> &String { &self.0 }
     pub fn the_bank() -> PlayerId { PlayerId("bank".to_owned()) }
 }
 impl<'de> Deserialize<'de> for PlayerId {
@@ -263,7 +263,7 @@ trait Auditable {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-struct WrappedAction {
+pub struct WrappedAction {
     // The id of the action, which should equal the line number of the trades list
     id: u64,
     // The time this action was performed
@@ -335,7 +335,7 @@ impl std::fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct UpdateBankPrices {
     withdraw_flat: u64,
     withdraw_per_stack: u64,
@@ -344,7 +344,7 @@ struct UpdateBankPrices {
     instant_smelt_per_stack: u64
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct State {
     next_id: u64,
     asset_info: std::collections::HashMap<AssetId, AssetInfo>,

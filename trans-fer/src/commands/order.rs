@@ -1,7 +1,8 @@
 use itertools::Itertools;
 use poise::{serenity_prelude::{self as serenity, CreateEmbed, CreateInteractionResponseMessage}, CreateReply};
 
-use crate::{commands::player_id, trade::Action};
+use crate::commands::player_id;
+use tpex::Action;
 
 use super::{Context, Error};
 // Commands that handle orders

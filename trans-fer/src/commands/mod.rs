@@ -2,13 +2,13 @@ mod withdraw;
 mod order;
 mod banker;
 
-use crate::trade::{self, AssetId, PlayerId};
+use tpex::{Action, AssetId, PlayerId};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 pub struct Data {
-    pub state: trade::State,
+    pub state: tpex::State,
     pub trade_file: tokio::fs::File
 }
 impl Data {
@@ -20,7 +20,7 @@ impl Data {
         self.trade_file.read_to_end(&mut buf).await.expect("Could not re-read trade file.");
         buf
     }
-    async fn run_action(&mut self, action: trade::Action) -> Result<u64, trade::Error> {
+    async fn run_action(&mut self, action: Action) -> Result<u64, tpex::Error> {
         self.state.apply(action, &mut self.trade_file).await
     }
 }
@@ -67,7 +67,7 @@ async fn buycoins(
     n_diamonds: u64,
 ) -> Result<(), Error> {
     let player = player_id(ctx.author());
-    ctx.data().write().await.run_action(trade::Action::BuyCoins { player, n_diamonds }).await?;
+    ctx.data().write().await.run_action(tpex::Action::BuyCoins { player, n_diamonds }).await?;
     ctx.reply("Purchase successful").await?;
     Ok(())
 }
@@ -79,7 +79,7 @@ async fn sellcoins(
     n_diamonds: u64,
 ) -> Result<(), Error> {
     let player = player_id(ctx.author());
-    ctx.data().write().await.run_action(trade::Action::SellCoins { player, n_diamonds }).await?;
+    ctx.data().write().await.run_action(tpex::Action::SellCoins { player, n_diamonds }).await?;
     ctx.reply("Purchase successful").await?;
     Ok(())
 }

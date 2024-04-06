@@ -8,7 +8,7 @@ pub struct PendingWithdrawl {
     pub total_fee: u64
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct WithdrawalTracker {
     pending_normal_withdrawals: std::collections::BTreeMap<u64, PendingWithdrawl>,
     pending_expedited_withdrawals: std::collections::BTreeMap<u64, PendingWithdrawl>,

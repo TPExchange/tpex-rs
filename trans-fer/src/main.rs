@@ -1,7 +1,7 @@
-mod commands;
-mod trade;
 use poise::serenity_prelude as serenity;
 use tokio::io::AsyncReadExt;
+
+mod commands;
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +16,7 @@ async fn main() {
     let mut assets = String::new();
     tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
     let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(trades_path).await.expect("Unable to open trade list");
-    let state = trade::State::replay(&mut trade_file, serde_json::from_str(&assets).expect("Unable to parse asset info")).await.expect("Could not replay trades");
+    let state = tpex::State::replay(&mut trade_file, serde_json::from_str(&assets).expect("Unable to parse asset info")).await.expect("Could not replay trades");
 
     let Ok(token) = std::env::var("DISCORD_TOKEN")
     else {

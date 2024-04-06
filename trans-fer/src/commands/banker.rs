@@ -4,7 +4,8 @@ use std::ops::Deref;
 
 use poise::{serenity_prelude::{self as serenity, Mentionable}, CreateReply};
 
-use crate::{commands::{list_assets, user_id}, trade::{Action, PlayerId}};
+use crate::commands::{list_assets, user_id};
+use tpex::{Action, PlayerId};
 
 use super::{player_id, Context, Error};
 // Commands that handle withdrawals
