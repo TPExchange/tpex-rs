@@ -4,3 +4,5 @@ trades.list
 Cargo.lock
 Dockerfile
 .dockerignore
+**/.sqlx/
+tpex-api/debug.db

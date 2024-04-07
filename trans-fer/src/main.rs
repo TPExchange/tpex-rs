@@ -12,37 +12,36 @@ async fn main() {
 
     let argv: Vec<_> = std::env::args().collect();
     let asset_path: &str = argv.get(1).expect("Missing asset path as first argument");
-    let trades_path: &str = argv.get(2).expect("Missing trades path as second argument");
+    let remote_url = argv.get(2).expect("Missing trades path as second argument").parse().expect("Could not parse remote url");
     let mut assets = String::new();
     tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
-    let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(trades_path).await.expect("Unable to open trade list");
-    let state = tpex::State::replay(&mut trade_file, serde_json::from_str(&assets).expect("Unable to parse asset info")).await.expect("Could not replay trades");
 
-    let Ok(token) = std::env::var("DISCORD_TOKEN")
-    else {
-        println!("Missing DISCORD_TOKEN, so verification mode enabled.\nState result:\n{}", serde_json::to_string_pretty(&state).expect("Could not serialise state"));
-        return;
-    };
+    let remote_token: tpex_api::Token = std::env::var("TPEX_TOKEN").expect("Missing TPEX_TOKEN environment variable").parse().expect("Could not parse TPEX_TOKEN");
+
+    let discord_token = std::env::var("DISCORD_TOKEN").expect("Missing DISCORD_TOKEN environment variable");
 
     // Discord setup
     let mut client = {
-        let data = std::sync::Arc::new(tokio::sync::RwLock::new(commands::Data{state, trade_file}));
+        let data = tpex_api::Mirrored::new(
+            serde_json::from_str(&assets).expect("Unable to parse asset list"),
+            remote_url,
+            remote_token).await;
         let intents = serenity::GatewayIntents::non_privileged();
 
         let framework = poise::Framework::builder()
-        .options(poise::FrameworkOptions::<commands::WrappedData, commands::Error> {
+        .options(poise::FrameworkOptions::<std::sync::Arc<tpex_api::Mirrored>, commands::Error> {
             commands: commands::get_commands(),
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(data)
+                Ok(std::sync::Arc::new(data))
             })
         })
         .build();
 
-        serenity::ClientBuilder::new(token, intents)
+        serenity::ClientBuilder::new(discord_token, intents)
             .framework(framework)
             .await
             .unwrap()

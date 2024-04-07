@@ -52,6 +52,17 @@ impl core::fmt::Display for PlayerId {
 }
 pub type AssetId = String;
 
+#[derive(PartialEq, Eq, Debug, PartialOrd, Ord)]
+pub enum ActionLevel {
+    Normal,
+    Banker
+}
+#[derive(PartialEq, Eq, Debug)]
+pub struct ActionPermissions {
+    pub level: ActionLevel,
+    pub player: PlayerId
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Action {
     /// Deleted transaction, for when someone does a bad
@@ -114,7 +125,8 @@ pub enum Action {
     // },
     /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
-        restricted_assets: Vec<AssetId>
+        restricted_assets: Vec<AssetId>,
+        banker: PlayerId,
     },
     /// Allows a player to place new withdrawal requests up to new_count of an item
     AuthoriseRestricted {
@@ -129,7 +141,8 @@ pub enum Action {
         withdraw_per_stack: u64,
         expedited: u64,
         investment_share: f64,
-        instant_smelt_per_stack: u64
+        instant_smelt_per_stack: u64,
+        banker: PlayerId,
     },
     // TODO: Not sure about these yet, let's see what demand we get
     // /// A futures contract is when someone promises to pay someone for assets in the future
@@ -167,11 +180,13 @@ pub enum Action {
     },
     /// Update the list of bankers to the given list
     UpdateBankers {
-        bankers: Vec<PlayerId>
+        bankers: Vec<PlayerId>,
+        banker: PlayerId,
     },
     /// Update the list of investable assets to the given list
     UpdateInvestables {
-        assets: Vec<AssetId>
+        assets: Vec<AssetId>,
+        banker: PlayerId,
     },
     /// Lock away assets for use by the bank, with the hope of profit
     Invest {
@@ -187,7 +202,8 @@ pub enum Action {
     },
     /// Update the list of items that the bank is willing to convert
     UpdateConvertables {
-        convertables: Vec<(AssetId, AssetId)>
+        convertables: Vec<(AssetId, AssetId)>,
+        banker: PlayerId,
     },
     /// Give a player access to invested items, and lock away the items needed to replenish the invested stock
     InstantConvert {
@@ -198,14 +214,29 @@ pub enum Action {
     }
 }
 impl Action {
-    fn should_audit(&self) -> bool {
+    fn adjust_audit(&self, mut audit: Audit) -> Option<Audit> {
         match self {
-            Action::Deposit { .. } | // Deposit adds items in
-            Action::WithdrawlCompleted { .. } | // Completing a withdrawal takes items out
-            Action::BuyCoins { .. } | // This turns one asset into another
-            Action::SellCoins { .. } // This turns one asset into another
-                => false,
-            _ => true
+            Action::Deposit { asset, count, .. } => {
+                audit.add_asset(asset.clone(), *count);
+                Some(audit)
+            }
+            Action::WithdrawlCompleted{..} => {
+                // We don't know what the withdrawal is just from the action
+                //
+                // TODO: find a way to track this nicely
+                None
+            }
+            Action::BuyCoins { n_diamonds,.. } => {
+                audit.coins += *n_diamonds * COINS_PER_DIAMOND;
+                audit.sub_asset(DIAMOND_NAME.to_owned(), *n_diamonds).expect("Unable to adjust down buy coins audit");
+                Some(audit)
+            }
+            Action::SellCoins { n_diamonds, .. } => {
+                audit.sub_coins(*n_diamonds * COINS_PER_DIAMOND).expect("Unable to adjust sell buy coins audit");
+                audit.add_asset(DIAMOND_NAME.to_owned(), *n_diamonds);
+                Some(audit)
+            },
+            _ => Some(audit)
         }
     }
 }
@@ -291,7 +322,8 @@ pub enum Error {
     NotInvestable{asset: AssetId},
     InvestmentBusy{asset: AssetId, amount_over: u64},
     NotConvertable{from: AssetId, to: AssetId},
-    AlreadyDone
+    AlreadyDone,
+    IsNotABanker{player: PlayerId}
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -329,6 +361,9 @@ impl std::fmt::Display for Error {
             },
             Error::AlreadyDone => {
                 write!(f, "The requested action is redundant.")
+            },
+            Error::IsNotABanker { player } => {
+                write!(f, "The requested action would require {player} to be a banker, but they are not.")
             }
         }
 
@@ -383,6 +418,8 @@ impl State {
             withdrawal: Default::default(),
         }
     }
+    /// Get the next line
+    pub fn get_next(&self) -> u64 { self.next_id }
     /// Get a player's balance
     pub fn get_bal(&self, player: &PlayerId) -> u64 { self.balance.get_bal(player) }
     /// Get a player's assets
@@ -405,7 +442,7 @@ impl State {
     /// List all orders
     pub fn get_orders(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.order.get_all() }
     /// Get a specific order
-    pub fn get_order(&self, id: u64) -> Option<PendingOrder> { self.order.get_order(id) }
+    pub fn get_order(&self, id: u64) -> Result<PendingOrder, Error> { self.order.get_order(id) }
     /// Prices for an asset, returns (price, amount) in (buy, sell)
     pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<u64, u64>, std::collections::BTreeMap<u64, u64>) { self.order.get_prices(asset) }
     /// Returns true if the given item is currently restricted
@@ -420,7 +457,41 @@ impl State {
     pub fn asset_info(&self, asset: &AssetId) -> Result<AssetInfo, Error> {
         self.asset_info.get(asset).cloned().ok_or_else(|| Error::UnknownAsset { asset: asset.clone() })
     }
-    // Distribute the profits among the investors
+    /// Get the required permissions for a given action
+    pub fn perms(&self, action: &Action) -> Result<ActionPermissions, Error> {
+        match action {
+            Action::AuthoriseRestricted { banker, .. } |
+            Action::Deleted { banker, .. } |
+            Action::Deposit { banker, .. } |
+            Action::UpdateBankPrices { banker, .. } |
+            Action::UpdateBankers { banker, .. } |
+            Action::UpdateConvertables { banker, .. } |
+            Action::UpdateInvestables { banker, .. } |
+            Action::UpdateRestricted { banker, .. } |
+            Action::WithdrawlCompleted { banker, .. }
+                => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
+
+            Action::BuyCoins { player, .. } |
+            Action::BuyOrder { player, .. } |
+            Action::InstantConvert { player, .. }  |
+            Action::Invest { player, .. } |
+            Action::SellCoins { player, .. } |
+            Action::SellOrder { player, .. } |
+            Action::TransferAsset { payer: player, .. } |
+            Action::TransferCoins { payer: player, .. } |
+            Action::Uninvest { player, .. } |
+            Action::WithdrawlRequested { player, .. }
+                => Ok(ActionPermissions{level: ActionLevel::Normal, player: player.clone()}),
+
+            Action::Expedited { target } =>
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: self.withdrawal.get_withdrawal(*target)?.player.clone()}),
+            Action::CancelOrder { target_id } =>
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target_id)?.player.clone()})
+
+
+        }
+    }
+    /// Distribute the profits among the investors
     fn distribute_profit(&mut self, asset: &AssetId, amount: u64) {
         let mut investors = self.investment.get_investors(asset);
         // Let's be fair and not give ourselves all the money
@@ -441,6 +512,15 @@ impl State {
     // This means the function will change significant things (i.e. more than just creating empty lists) IF AND ONLY IF it fully succeeds.
     // As such, we don't have to worry about giving it bad actions
     fn apply_inner(&mut self, id: u64, action: Action) -> Result<(), Error> {
+        // Blanket check perms
+        //
+        // TODO: optimise
+        if let ActionPermissions { level: ActionLevel::Banker, player } = self.perms(&action)? {
+            if !self.is_banker(&player) {
+                return Err(Error::IsNotABanker { player });
+            }
+        }
+
         match action {
             Action::Deleted{..} => Ok(()),
             Action::Deposit { player, asset, count, .. } => {
@@ -557,7 +637,7 @@ impl State {
                 self.balance.commit_coin_add(&player, n_diamonds);
                 Ok(())
             },
-            Action::UpdateRestricted { restricted_assets } => {
+            Action::UpdateRestricted { restricted_assets , ..} => {
                 self.restricted_assets = std::collections::HashSet::from_iter(restricted_assets);
                 Ok(())
             },
@@ -565,7 +645,7 @@ impl State {
                 self.authorisations.entry(authorisee).or_default().insert(asset, new_count);
                 Ok(())
             },
-            Action::UpdateBankPrices { withdraw_flat, withdraw_per_stack, expedited, investment_share, instant_smelt_per_stack } => {
+            Action::UpdateBankPrices { withdraw_flat, withdraw_per_stack, expedited, investment_share, instant_smelt_per_stack , ..} => {
                 self.fees = UpdateBankPrices{ withdraw_flat, withdraw_per_stack, expedited, investment_share, instant_smelt_per_stack };
                 Ok(())
             },
@@ -583,10 +663,9 @@ impl State {
                 self.balance.commit_asset_add(&payee,  &asset, count);
                 Ok(())
             },
-            Action::Expedited { target } => {
+            Action::Expedited { target, .. } => {
                 // Find the withdrawal
-                let Some(withdrawal) = self.withdrawal.get_withdrawal(id)
-                else { return Err(Error::InvalidId { id: target }) };
+                let withdrawal = self.withdrawal.get_withdrawal(id)?;
                 // If the withdrawal is already expedited, this should not be attempted
                 if withdrawal.expedited {
                     return Err(Error::AlreadyDone)
@@ -598,11 +677,11 @@ impl State {
                 self.withdrawal.expedite(target, fee).expect("Withdrawal exists and is normal but cannot be expedited");
                 Ok(())
             },
-            Action::UpdateBankers { bankers } => {
+            Action::UpdateBankers { bankers, .. } => {
                 self.bankers = std::collections::HashSet::from_iter(bankers);
                 Ok(())
             },
-            Action::UpdateInvestables { assets } => {
+            Action::UpdateInvestables { assets, .. } => {
                 self.investables = assets.into_iter().collect();
                 Ok(())
             },
@@ -649,37 +728,38 @@ impl State {
 
                 Ok(())
             }
-            Action::UpdateConvertables { convertables } => {
+            Action::UpdateConvertables { convertables, .. } => {
                 self.convertables = convertables.into_iter().collect();
                 Ok(())
             }
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
-    pub async fn replay(trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin), asset_info: std::collections::HashMap<AssetId, AssetInfo>) -> Result<State, Error> {
-        let mut state = Self::new(asset_info);
-
+    pub async fn replay(&mut self, trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin)) -> Result<(), Error> {
         let trade_file_reader = tokio::io::BufReader::new(trade_file);
         let mut trade_file_lines = trade_file_reader.lines();
+        let mut last_audit = self.hard_audit();
         while let Some(line) = trade_file_lines.next_line().await.expect("Could not read line from trade list") {
             let wrapped_action: WrappedAction = serde_json::from_str(&line).expect("Corrupted trade file");
-            if wrapped_action.id != state.next_id {
-                panic!("Trade file ID mismatch: action {} found on line {}", wrapped_action.id, state.next_id);
+            if wrapped_action.id != self.next_id {
+                panic!("Trade file ID mismatch: action {} found on line {}", wrapped_action.id, self.next_id);
             }
-            if wrapped_action.action.should_audit() {
-                let pre = state.hard_audit();
-                state.apply_inner(state.next_id, wrapped_action.action)?;
-                let post = state.hard_audit();
-                if pre != post {
-                    panic!("Failed audit on {line}: pre {pre:?} vs post {post:?}");
+            if let Some(new_audit) = wrapped_action.action.adjust_audit(last_audit) {
+                self.apply_inner(self.next_id, wrapped_action.action)?;
+                let post = self.hard_audit();
+                if new_audit != post {
+                    panic!("Failed audit on {line}: expected {new_audit:?} vs actual {post:?}");
                 }
+                last_audit = new_audit;
             }
             else {
-                state.apply_inner(state.next_id, wrapped_action.action)?;
+                self.apply_inner(self.next_id, wrapped_action.action)?;
+                // The state has changed, adjust the audit
+                last_audit = self.hard_audit();
             }
-            state.next_id += 1;
+            self.next_id += 1;
         }
-        Ok(state)
+        Ok(())
     }
     /// Atomically try to apply an action, and if successful, write to given stream
     pub async fn apply(&mut self, action: Action, out: &mut (impl tokio::io::AsyncWrite + std::marker::Unpin)) -> Result<u64, Error> {
@@ -691,12 +771,12 @@ impl State {
         };
         let mut line = serde_json::to_string(&wrapped_action).expect("Cannot serialise action");
         let res;
-        if wrapped_action.action.should_audit() {
-            let pre = self.hard_audit();
+        // We can soft audit, as the last one was checked as required
+        if let Some(expected) = wrapped_action.action.adjust_audit(self.soft_audit()) {
             res = self.apply_inner(self.next_id, wrapped_action.action);
             let post = self.hard_audit();
-            if pre != post {
-                panic!("Failed audit on {line}: pre {pre:?} vs post {post:?}");
+            if expected != post {
+                panic!("Failed audit on {line}: expected {expected:?} vs actual {post:?}");
             }
         }
         else {

@@ -1,14 +1,38 @@
 [package]
 name = "tpex-api"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 tpex = { path = "../tpex", version = "^0.1.0" }
-axum = "^0.7.5"
-tower-sessions = "^0.12.1"
 tokio = { version = "^1.36.0", features = ["default", "rt-multi-thread"] }
 clap = { version = "^4.5.4", features = ["derive"] }
-serde_json = "^1.0.114"
+base64 = "^0.22.0"
+num-traits = { version = "^0.2" }
+num-derive = { version = "^0.4" }
+serde = { version = "^1.0", features = ["std"] }
+
+axum-extra = { version = "^0.9.3", features = ["typed-header"], optional = true }
+sqlx = { version = "^0.7.4", features = ["runtime-tokio", "sqlite"], optional = true }
+axum = { version = "^0.7.5", features = ["macros"], optional = true }
+getrandom = { version = "^0.2.13", optional = true }
+serde_json = { version = "^1.0.114", optional = true }
+
+reqwest = {version = "^0.12.3", features = ["json"], optional = true}
+
+[features]
+bin = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json"]
+lib = ["dep:reqwest"]
+default = ["lib"]
+
+[[bin]]
+name = "tpex-srv"
+path = "src/server.rs"
+required-features = ["bin"]
+
+[lib]
+name = "tpex_api"
+path = "src/lib.rs"
+required-features = ["lib"]

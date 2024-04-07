@@ -25,9 +25,10 @@ impl WithdrawalTracker {
         ret
     }
     /// Get a withdrawal
-    pub fn get_withdrawal(&self, id: u64) -> Option<PendingWithdrawl> {
+    pub fn get_withdrawal(&self, id: u64) -> Result<PendingWithdrawl, Error> {
         self.pending_normal_withdrawals.get(&id)
         .or_else(|| self.pending_expedited_withdrawals.get(&id)).cloned()
+        .ok_or(Error::InvalidId { id })
     }
     /// Get the next withdrawal that bankers should complete
     pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawl> {

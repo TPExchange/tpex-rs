@@ -1,7 +1,6 @@
-// XXX: make sure to put the check in for EVERY command you add!
-
 use std::ops::Deref;
 
+// XXX: make sure to put the check in for EVERY command you add!
 use poise::{serenity_prelude::{self as serenity, Mentionable}, CreateReply};
 
 use crate::commands::{list_assets, user_id};
@@ -13,7 +12,7 @@ use super::{player_id, Context, Error};
 pub async fn banker(_ctx: Context<'_>) -> Result<(), Error> { panic!("Banker metacommand called."); }
 
 async fn check(ctx: Context<'_>) -> Result<bool, Error> {
-    Ok(ctx.data().read().await.state.is_banker(&player_id(ctx.author())))
+    Ok(ctx.data().sync().await.is_banker(&player_id(ctx.author())))
 }
 
 /// Run a raw JSON action on the state. DANGEROUS AF!!!
@@ -27,7 +26,7 @@ pub async fn raw(
         ctx.say("Invalid command.").await?;
         return Ok(());
     };
-    ctx.data().write().await.run_action(action).await?;
+    ctx.data().apply(action).await?;
     ctx.reply("Action succeeded!").await?;
     Ok(())
 }
@@ -46,7 +45,7 @@ pub async fn deposit(
     let player = player_id(&player);
     let banker = player_id(ctx.author());
     let response = format!("Deposited {count} {asset} for {player}.");
-    ctx.data().write().await.run_action(Action::Deposit { player, asset, count, banker }).await?;
+    ctx.data().apply(Action::Deposit { player, asset, count, banker }).await?;
     ctx.reply(response).await?;
     Ok(())
 }
@@ -62,11 +61,10 @@ pub async fn reserve(
 ) -> Result<(), Error> {
     let banker = player_id(ctx.author());
     let response = format!("Added {count} {asset} to the reserve.");
-    // Do these back to back
+    // Do these back to back, but not necessarily consecutively
     {
-        let mut data = ctx.data().write().await;
-        data.run_action(Action::Deposit { player: PlayerId::the_bank(), asset: asset.clone(), count, banker }).await?;
-        data.run_action(Action::Invest { player: PlayerId::the_bank(), asset, count }).await.expect("Unable to invest from bank");
+        ctx.data().apply(Action::Deposit { player: PlayerId::the_bank(), asset: asset.clone(), count, banker }).await?;
+        ctx.data().apply(Action::Invest { player: PlayerId::the_bank(), asset, count }).await?;
     }
     ctx.reply(response).await?;
     Ok(())
@@ -80,7 +78,7 @@ pub async fn complete(
     withdrawal_id: u64
 ) -> Result<(), Error> {
     let banker = player_id(ctx.author());
-    ctx.data().write().await.run_action(Action::WithdrawlCompleted { target: withdrawal_id, banker }).await?;
+    ctx.data().apply(Action::WithdrawlCompleted { target: withdrawal_id, banker }).await?;
     ctx.reply("Withdrawal completion succeeded.").await?;
     Ok(())
 }
@@ -93,7 +91,7 @@ pub async fn pay(
     coins: u64
 ) -> Result<(), Error> {
     let banker = player_id(ctx.author());
-    ctx.data().write().await.run_action(Action::TransferCoins { payer: PlayerId::the_bank(), payee: banker, count: coins }).await?;
+    ctx.data().apply(Action::TransferCoins { payer: PlayerId::the_bank(), payee: banker, count: coins }).await?;
 
     ctx.reply("Profits taken").await?;
     Ok(())
@@ -102,7 +100,7 @@ pub async fn pay(
 /// Gets the next withdrawal that needs to be completed
 #[poise::command(slash_command,ephemeral, check = check)]
 pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
-    let Some(current) = ctx.data().read().await.state.get_next_withdrawal()
+    let Some(current) = ctx.data().sync().await.get_next_withdrawal()
     else {
         ctx.reply("No withdrawals left.").await?;
         return Ok(());
@@ -110,7 +108,7 @@ pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
 
     ctx.send(
         CreateReply::default()
-        .embed(list_assets(ctx.data().read().await.deref(), &current.assets)?)
+        .embed(list_assets(ctx.data().sync().await.deref(), &current.assets)?)
         .content(format!("Deliver to {}", user_id(&current.player).expect("Invalid player ID").mention()))
     ).await?;
     Ok(())
@@ -126,6 +124,6 @@ pub async fn authorise(ctx: Context<'_>,
     #[description = "The new amount of that asset to be authorised"]
     new_count: u64
 ) -> Result<(), Error> {
-    ctx.data().write().await.run_action(Action::AuthoriseRestricted { authorisee: player_id(&player), banker: player_id(ctx.author()), asset, new_count }).await?;
+    ctx.data().apply(Action::AuthoriseRestricted { authorisee: player_id(&player), banker: player_id(ctx.author()), asset, new_count }).await?;
     Ok(())
 }
