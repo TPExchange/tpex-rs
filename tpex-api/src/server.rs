@@ -12,9 +12,9 @@ use tpex::{Action, ActionLevel};
 #[derive(clap::Parser)]
 struct Args {
     trades: std::path::PathBuf,
-    assets: std::path::PathBuf,
     endpoint: String,
-    db: String
+    db: String,
+    assets: Option<std::path::PathBuf>,
 }
 
 struct TPExState {
@@ -79,10 +79,9 @@ impl axum::response::IntoResponse for Error {
     }
 }
 
-#[axum::debug_handler]
 async fn state_patch(
     axum::extract::State(state): axum::extract::State<State>,
-    token: tokens::TokenInfo,
+    token: TokenInfo,
     axum::extract::Json(action): axum::extract::Json<tpex::Action>)
     -> Result<axum::response::Json<u64>, Error>
 {
@@ -103,23 +102,23 @@ async fn state_patch(
     let id = state.tpex.write().await.apply(action).await?;
     Ok(axum::Json(id))
 }
-#[axum::debug_handler]
+
 async fn state_get(
     axum::extract::State(state): axum::extract::State<State>,
     // must extract token to auth
-    _token: tokens::TokenInfo,
-    axum::extract::Query(from): axum::extract::Query<Option<u64>>)
+    _token: TokenInfo,
+    axum_extra::extract::OptionalQuery(args): axum_extra::extract::OptionalQuery<StateGetArgs>)
     -> axum::response::Response
 {
-    let from = from.unwrap_or(0).try_into().unwrap_or(usize::MAX);
+    let from = args.unwrap_or_default().from.unwrap_or(0).try_into().unwrap_or(usize::MAX);
     let mut data = state.tpex.write().await.get_lines().await;
-    if from > 0 {
+    if from > 1 {
         let idx =
             data.iter()
             .enumerate()
             .filter(|(_, i)| **i == b'\n')
             .map(|(idx,_)| idx)
-            .nth(from - 1)
+            .nth(from - 2)
             .unwrap_or(usize::MAX);
         if idx >= data.len() {
             data = Vec::new();
@@ -135,10 +134,16 @@ async fn state_get(
     .expect("Unable to create state_get response")
 }
 
-#[axum::debug_handler]
+async fn token_get(
+    axum::extract::State(_state): axum::extract::State<State>,
+    token: TokenInfo)
+    -> axum::Json<TokenInfo> {
+    axum::Json(token)
+}
+
 async fn token_post(
     axum::extract::State(state): axum::extract::State<State>,
-    token: tokens::TokenInfo,
+    token: TokenInfo,
     axum::extract::Json(args): axum::extract::Json<TokenPostArgs>)
     -> Result<axum::Json<Token>, Error>
 {
@@ -152,10 +157,9 @@ async fn token_post(
     Ok(axum::Json(state.tokens.create_token(args.level, args.user).await.expect("Cannot access DB")))
 }
 
-#[axum::debug_handler]
 async fn token_delete(
     axum::extract::State(state): axum::extract::State<State>,
-    token: tokens::TokenInfo,
+    token: TokenInfo,
     axum::extract::Json(args): axum::extract::Json<TokenDeleteArgs>)
     -> Result<axum::Json<()>, Error>
 {
@@ -173,23 +177,40 @@ async fn main() {
 
     let args = Args::parse();
 
-    let mut assets = String::new();
-    tokio::fs::File::open(args.assets).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
-
     let mut trade_file = tokio::fs::File::options().read(true).write(true).truncate(false).create(true).open(args.trades).await.expect("Unable to open trade list");
-    let tpex_state = tpex::State::replay(&mut trade_file, serde_json::from_str(&assets).expect("Unable to parse asset info")).await.expect("Could not replay trades");
+    let mut tpex_state = tpex::State::new();
+    if let Some(asset_path) = args.assets {
+        let mut assets = String::new();
+        tokio::fs::File::open(asset_path).await.expect("Unable to open asset info")
+        .read_to_string(&mut assets).await.expect("Unable to read asset list");
+
+        tpex_state.update_asset_info(serde_json::from_str(&assets).expect("Unable to parse asset info"))
+    }
+    tpex_state.replay(&mut trade_file).await.expect("Could not replay trades");
+
     let token_handler = tokens::TokenHandler::new(&args.db).await.expect("Could not connect to DB");
+
     let state = StateStruct {
         tpex: tokio::sync::RwLock::new(TPExState { state: tpex_state, file: trade_file }),
         tokens: token_handler
     };
 
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_headers(tower_http::cors::Any)
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods(tower_http::cors::Any);
+
     let app = Router::new()
-        .route("/state", axum::routing::patch(state_patch))
         .route("/state", axum::routing::get(state_get))
+        .route("/state", axum::routing::patch(state_patch))
+
+        .route("/token", axum::routing::get(token_get))
         .route("/token", axum::routing::post(token_post))
         .route("/token", axum::routing::delete(token_delete))
-        .with_state(std::sync::Arc::new(state));
+
+        .with_state(std::sync::Arc::new(state))
+
+        .route_layer(cors);
 
     let listener = tokio::net::TcpListener::bind(args.endpoint).await.expect("Could not bind to endpoint");
     axum::serve(listener, app).await.unwrap();

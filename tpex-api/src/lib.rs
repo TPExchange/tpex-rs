@@ -52,13 +52,14 @@ pub struct Mirrored {
     state: tokio::sync::RwLock<State>
 }
 impl Mirrored {
-    pub async fn new(asset_info: std::collections::HashMap<AssetId, AssetInfo>, endpoint: reqwest::Url, token: Token) -> Mirrored {
-        let ret = Mirrored {
+    pub fn new(endpoint: reqwest::Url, token: Token) -> Mirrored {
+        Mirrored {
             remote: Remote::new(endpoint, token),
-            state: tokio::sync::RwLock::new(State::new(asset_info))
-        };
-        drop(ret.sync().await);
-        ret
+            state: tokio::sync::RwLock::new(State::new())
+        }
+    }
+    pub async fn update_asset_info(&self, asset_info: std::collections::HashMap<AssetId, AssetInfo>) {
+        self.state.write().await.update_asset_info(asset_info)
     }
     pub async fn sync(&self) -> tokio::sync::RwLockReadGuard<State> {
         let mut state = self.state.write().await;

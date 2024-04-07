@@ -1,15 +1,12 @@
+use std::str::FromStr;
+
 use axum::{async_trait, http::StatusCode};
 use axum_extra::headers::{authorization::Bearer, Authorization, HeaderMapExt};
 use num_traits::FromPrimitive;
 use tpex::PlayerId;
 use crate::shared::*;
 
-#[derive(PartialEq, Eq, Debug, sqlx::FromRow)]
-pub(crate) struct TokenInfo {
-    pub token: Token,
-    pub user: PlayerId,
-    pub level: TokenLevel
-}
+
 #[async_trait]
 impl axum::extract::FromRequestParts<super::State> for TokenInfo {
     type Rejection = StatusCode;
@@ -39,8 +36,9 @@ pub struct TokenHandler {
 }
 impl TokenHandler {
     pub async fn new(url: &str) -> sqlx::Result<TokenHandler> {
+        let opt = sqlx::sqlite::SqliteConnectOptions::from_str(url)?.create_if_missing(true);
         let ret = TokenHandler{
-            pool: sqlx::SqlitePool::connect(url).await?
+            pool: sqlx::SqlitePool::connect_with(opt).await?
         };
 
         sqlx::migrate!("../migrations").run(&ret.pool).await?;

@@ -2,31 +2,11 @@ mod withdraw;
 mod order;
 mod banker;
 
-use tpex::{Action, AssetId, PlayerId};
+use tpex::{AssetId, PlayerId};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-
-pub struct Data {
-    pub state: tpex::State,
-    pub trade_file: tokio::fs::File
-}
-impl Data {
-    async fn get_lines(&mut self) -> Vec<u8> {
-        // Keeping everything in the log file means we can't have different versions of the same data
-        self.trade_file.rewind().await.expect("Could not rewind trade file.");
-        let mut buf = Vec::new();
-        // This will seek to the end again, so pos is the same before and after get_lines
-        self.trade_file.read_to_end(&mut buf).await.expect("Could not re-read trade file.");
-        buf
-    }
-    async fn run_action(&mut self, action: Action) -> Result<u64, tpex::Error> {
-        self.state.apply(action, &mut self.trade_file).await
-    }
-}
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
-pub(crate) type WrappedData = std::sync::Arc<tokio::sync::RwLock<Data>>;
 type Context<'a> = poise::Context<'a, std::sync::Arc<tpex_api::Mirrored>, Error>;
 
 fn player_id(user: &serenity::User) -> PlayerId {

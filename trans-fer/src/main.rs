@@ -1,20 +1,25 @@
+use clap::Parser;
 use poise::serenity_prelude as serenity;
 use tokio::io::AsyncReadExt;
 
 mod commands;
 
+
+#[derive(clap::Parser)]
+struct Args {
+    assets: Option<std::path::PathBuf>,
+    endpoint: String,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
     // The code here just starts the discord bot, as we respond to commands
 
     // Database setup
     // let mut db = self::db::DatabaseConnection::new(std::env::var("DATABASE_URL").expect("missing DATABASE_URL")).await.expect("Failed to init database");
 
-    let argv: Vec<_> = std::env::args().collect();
-    let asset_path: &str = argv.get(1).expect("Missing asset path as first argument");
-    let remote_url = argv.get(2).expect("Missing trades path as second argument").parse().expect("Could not parse remote url");
-    let mut assets = String::new();
-    tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
+    let remote_url = args.endpoint.parse().expect("Could not parse remote url");
 
     let remote_token: tpex_api::Token = std::env::var("TPEX_TOKEN").expect("Missing TPEX_TOKEN environment variable").parse().expect("Could not parse TPEX_TOKEN");
 
@@ -22,10 +27,13 @@ async fn main() {
 
     // Discord setup
     let mut client = {
-        let data = tpex_api::Mirrored::new(
-            serde_json::from_str(&assets).expect("Unable to parse asset list"),
-            remote_url,
-            remote_token).await;
+        let data = tpex_api::Mirrored::new(remote_url, remote_token);
+        if let Some(asset_path) = args.assets {
+            let mut assets = String::new();
+            tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
+            data.update_asset_info(serde_json::from_str(&assets).expect("Unable to parse asset info")).await;
+        }
+
         let intents = serenity::GatewayIntents::non_privileged();
 
         let framework = poise::Framework::builder()

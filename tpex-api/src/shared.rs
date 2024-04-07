@@ -49,6 +49,14 @@ impl Display for Token {
         write!(f, "{}", BASE64_STANDARD_NO_PAD.encode(self.0))
     }
 }
+#[derive(PartialEq, Eq, Debug, sqlx::FromRow)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct TokenInfo {
+    pub token: Token,
+    pub user: PlayerId,
+    pub level: TokenLevel
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenPostArgs {
     pub level: TokenLevel,
@@ -58,4 +66,10 @@ pub struct TokenPostArgs {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenDeleteArgs {
     pub token: Option<Token>
+}
+
+#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct StateGetArgs {
+    pub from: Option<u64>
 }

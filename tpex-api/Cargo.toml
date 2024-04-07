@@ -8,24 +8,25 @@ edition = "2021"
 [dependencies]
 tpex = { path = "../tpex", version = "^0.1.0" }
 tokio = { version = "^1.36.0", features = ["default", "rt-multi-thread"] }
-clap = { version = "^4.5.4", features = ["derive"] }
 base64 = "^0.22.0"
 num-traits = { version = "^0.2" }
 num-derive = { version = "^0.4" }
 serde = { version = "^1.0", features = ["std"] }
 
-axum-extra = { version = "^0.9.3", features = ["typed-header"], optional = true }
+axum-extra = { version = "^0.9.3", features = ["typed-header", "query"], optional = true }
 sqlx = { version = "^0.7.4", features = ["runtime-tokio", "sqlite"], optional = true }
 axum = { version = "^0.7.5", features = ["macros"], optional = true }
 getrandom = { version = "^0.2.13", optional = true }
 serde_json = { version = "^1.0.114", optional = true }
+clap = { version = "^4.5.4", features = ["derive"], optional = true }
+tower-http = { version = "^0.5", features = ["cors"], optional = true}
 
 reqwest = {version = "^0.12.3", features = ["json"], optional = true}
 
 [features]
-bin = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json"]
+bin = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json", "dep:clap", "dep:tower-http"]
 lib = ["dep:reqwest"]
-default = ["lib"]
+default = ["lib", "bin"]
 
 [[bin]]
 name = "tpex-srv"

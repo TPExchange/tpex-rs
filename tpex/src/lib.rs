@@ -242,9 +242,9 @@ impl Action {
 }
 
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
-struct Audit {
-    coins: u64,
-    assets: std::collections::HashMap<AssetId, u64>
+pub struct Audit {
+    pub coins: u64,
+    pub assets: std::collections::HashMap<AssetId, u64>
 }
 impl Audit {
     pub fn add_asset(&mut self, asset: AssetId, count: u64) {
@@ -286,7 +286,7 @@ impl AddAssign for Audit {
     }
 }
 
-trait Auditable {
+pub trait Auditable {
     // Check internal counters, will be called after every action
     fn soft_audit(&self) -> Audit;
     // Verify internal counters, will be called rarely. Should panic if inconsistencies found
@@ -398,10 +398,10 @@ pub struct State {
     order: order::OrderTracker,
     withdrawal: withdrawal::WithdrawalTracker
 }
-impl State {
-    /// Create a new empty state
-    pub fn new(asset_info: std::collections::HashMap<AssetId, AssetInfo>) -> State {
-        State{
+impl Default for State {
+    fn default() -> State {
+        let asset_info = serde_json::from_str(include_str!("../resources/assets.json")).expect("Could not parse asset_info");
+        State {
             asset_info,
             fees: INITIAL_BANK_PRICES,
             restricted_assets: Default::default(),
@@ -409,7 +409,7 @@ impl State {
             earnings: Default::default(),
             // Start on ID 1 for nice mapping to line numbers
             next_id: 1,
-            bankers: Default::default(),
+            bankers: [PlayerId::the_bank()].into_iter().collect(),
             investables: Default::default(),
             convertables: Default::default(),
             balance: Default::default(),
@@ -417,6 +417,14 @@ impl State {
             order: Default::default(),
             withdrawal: Default::default(),
         }
+    }
+}
+impl State {
+    /// Create a new empty state
+    pub fn new() -> State { Self::default() }
+    /// Adds or updates the given asset infos
+    pub fn update_asset_info(&mut self, asset_info: std::collections::HashMap<AssetId, AssetInfo>) {
+        self.asset_info.extend(asset_info);
     }
     /// Get the next line
     pub fn get_next(&self) -> u64 { self.next_id }
