@@ -2,6 +2,7 @@ use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
 #[derive(Debug, Clone)]
 pub struct PendingWithdrawl {
+    pub id: u64,
     pub player: PlayerId,
     pub assets: std::collections::HashMap<AssetId, u64>,
     pub expedited: bool,
@@ -35,7 +36,7 @@ impl WithdrawalTracker {
         self.pending_expedited_withdrawals.values().next().or_else(|| self.pending_normal_withdrawals.values().next()).cloned()
     }
     pub fn track_withdrawal(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>, total_fee: u64) {
-        self.pending_normal_withdrawals.insert(id, PendingWithdrawl{ player, assets: assets.clone(), expedited: false, total_fee });
+        self.pending_normal_withdrawals.insert(id, PendingWithdrawl{ id, player, assets: assets.clone(), expedited: false, total_fee });
         self.current_audit += Audit{coins: total_fee, assets}
     }
     pub fn expedite(&mut self, id: u64, fee: u64) -> Result<(), Error> {
@@ -57,7 +58,11 @@ impl WithdrawalTracker {
         let Some(res) = self.pending_normal_withdrawals.remove(&id).or_else(|| self.pending_expedited_withdrawals.remove(&id))
         else { return Err(Error::InvalidId{id}); };
         // We are no longer responsible for the fee
-        self.current_audit.sub_coins(res.total_fee).expect("Unaudited fee in withdrawal");
+        self.current_audit.sub_coins(res.total_fee).expect("Unaudited fee in withdrawl");
+        // We no longer have the items
+        for (asset, count) in res.assets.iter() {
+            self.current_audit.sub_asset(asset.clone(), *count).expect("Oversubtracted asset in withdrawl completion");
+        }
         Ok(res)
     }
 }

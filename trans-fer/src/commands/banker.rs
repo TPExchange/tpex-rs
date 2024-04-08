@@ -145,7 +145,7 @@ pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
     ctx.send(
         CreateReply::default()
         .embed(list_assets(ctx.data().sync().await.deref(), &current.assets)?)
-        .content(format!("Deliver to {}", user_id(&current.player).expect("Invalid player ID").mention()))
+        .content(format!("Deliver to {} (ID: {})", user_id(&current.player).expect("Invalid player ID").mention(), current.id))
     ).await?;
     Ok(())
 }
