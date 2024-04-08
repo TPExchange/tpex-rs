@@ -2,5 +2,4 @@
 .vscode
 trades.list
 Cargo.lock
-**/.sqlx/
 tpex-api/debug.db
