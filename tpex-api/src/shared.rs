@@ -49,7 +49,7 @@ impl Display for Token {
         write!(f, "{}", BASE64_STANDARD_NO_PAD.encode(self.0))
     }
 }
-#[derive(PartialEq, Eq, Debug, sqlx::FromRow)]
+#[derive(PartialEq, Eq, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenInfo {
     pub token: Token,
@@ -72,4 +72,10 @@ pub struct TokenDeleteArgs {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StateGetArgs {
     pub from: Option<u64>
+}
+
+#[derive(Default, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ErrorInfo {
+    pub error: String
 }

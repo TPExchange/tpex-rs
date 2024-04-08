@@ -211,6 +211,13 @@ pub enum Action {
         from: AssetId,
         to: AssetId,
         count: u64
+    },
+    /// Used to correct typos
+    Undeposit {
+        player: PlayerId,
+        asset: AssetId,
+        count: u64,
+        banker: PlayerId
     }
 }
 impl Action {
@@ -219,18 +226,22 @@ impl Action {
             Action::Deposit { asset, count, .. } => {
                 audit.add_asset(asset.clone(), *count);
                 Some(audit)
+            },
+            Action::Undeposit {asset, count, .. } => {
+                audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");
+                None
             }
             Action::WithdrawlCompleted{..} => {
                 // We don't know what the withdrawal is just from the action
                 //
                 // TODO: find a way to track this nicely
                 None
-            }
+            },
             Action::BuyCoins { n_diamonds,.. } => {
                 audit.coins += *n_diamonds * COINS_PER_DIAMOND;
                 audit.sub_asset(DIAMOND_NAME.to_owned(), *n_diamonds).expect("Unable to adjust down buy coins audit");
                 Some(audit)
-            }
+            },
             Action::SellCoins { n_diamonds, .. } => {
                 audit.sub_coins(*n_diamonds * COINS_PER_DIAMOND).expect("Unable to adjust sell buy coins audit");
                 audit.add_asset(DIAMOND_NAME.to_owned(), *n_diamonds);
@@ -476,7 +487,8 @@ impl State {
             Action::UpdateConvertables { banker, .. } |
             Action::UpdateInvestables { banker, .. } |
             Action::UpdateRestricted { banker, .. } |
-            Action::WithdrawlCompleted { banker, .. }
+            Action::WithdrawlCompleted { banker, .. } |
+            Action::Undeposit { banker, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
 
             Action::BuyCoins { player, .. } |
@@ -532,9 +544,15 @@ impl State {
         match action {
             Action::Deleted{..} => Ok(()),
             Action::Deposit { player, asset, count, .. } => {
+                if !self.asset_info.contains_key(&asset) {
+                    return Err(Error::UnknownAsset { asset });
+                }
                 self.balance.commit_asset_add(&player, &asset, count);
 
                 Ok(())
+            },
+            Action::Undeposit { player, asset, count, .. } => {
+                self.balance.commit_asset_removal(&player, &asset, count)
             },
             Action::WithdrawlRequested { player, assets} => {
                 let total_fee = self.calc_withdrawal_fee(&assets)?;

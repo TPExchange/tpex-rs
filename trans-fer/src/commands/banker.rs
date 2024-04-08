@@ -39,13 +39,49 @@ pub async fn deposit(
     player: serenity::User,
     #[description = "The asset to be deposited"]
     asset: String,
+    #[description = "The asset to be deposited, again"]
+    asset_again: String,
     #[description = "The amount of that asset to be deposited"]
-    count: u64
+    count: u64,
+    #[description = "The amount of that asset to be deposited, again"]
+    count_again: u64
 ) -> Result<(), Error> {
+    if asset != asset_again || count != count_again {
+        ctx.reply("Typo in asset or count. PLEASE CHECK FOR TYPOS NEXT TIME!!!").await?;
+        return Ok(());
+    }
+
     let player = player_id(&player);
     let banker = player_id(ctx.author());
     let response = format!("Deposited {count} {asset} for {player}.");
     ctx.data().apply(Action::Deposit { player, asset, count, banker }).await?;
+    ctx.reply(response).await?;
+    Ok(())
+}
+/// Mark resources as deposited for a user
+#[poise::command(slash_command,ephemeral, check = check)]
+pub async fn undeposit(
+    ctx: Context<'_>,
+    #[description = "The depositing user"]
+    player: serenity::User,
+    #[description = "The asset to be removed"]
+    asset: String,
+    #[description = "The asset to be removed, again"]
+    asset_again: String,
+    #[description = "The amount of that asset to be removed"]
+    count: u64,
+    #[description = "The amount of that asset to be removed, again"]
+    count_again: u64
+) -> Result<(), Error> {
+    if asset != asset_again || count != count_again {
+        ctx.reply("Typo in asset or count. PLEASE CHECK FOR TYPOS NEXT TIME!!!").await?;
+        return Ok(());
+    }
+
+    let player = player_id(&player);
+    let banker = player_id(ctx.author());
+    let response = format!("Deposited {count} {asset} for {player}.");
+    ctx.data().apply(Action::Undeposit { player, asset, count, banker }).await?;
     ctx.reply(response).await?;
     Ok(())
 }

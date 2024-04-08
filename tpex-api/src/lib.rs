@@ -5,6 +5,30 @@ use tpex::{AssetId, AssetInfo, State};
 
 pub use shared::Token;
 
+#[derive(Debug)]
+pub enum Error {
+    RequestFailure(reqwest::Error),
+    TPExFailure(ErrorInfo),
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::RequestFailure(err) => write!(f, "Request failure: {err}"),
+            Error::TPExFailure(err) => write!(f, "TPEx failure: {}", err.error)
+        }
+    }
+}
+impl std::error::Error for Error {}
+impl From<reqwest::Error> for Error {
+    fn from(value: reqwest::Error) -> Self { Error::RequestFailure(value) }
+}
+impl From<ErrorInfo> for Error {
+    fn from(value: ErrorInfo) -> Self { Error::TPExFailure(value) }
+}
+
+
+pub type Result<T> = core::result::Result<T, Error>;
+
 pub struct Remote {
     client: reqwest::Client,
     endpoint: reqwest::Url
@@ -20,38 +44,41 @@ impl Remote {
             endpoint
         }
     }
+    async fn check_response(response: reqwest::Response) -> Result<reqwest::Response> {
+        if response.status().is_success() { Ok(response) }
+        else { Err(Error::TPExFailure(response.json().await.expect("Invalid error json"))) }
+    }
 
-    pub async fn get_state(&self, from: u64) -> reqwest::Result<Vec<u8>> {
+    pub async fn get_state(&self, from: u64) -> Result<Vec<u8>> {
         let mut target = self.endpoint.clone();
         target.query_pairs_mut().append_pair("from", &from.to_string());
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
-        println!("{:?}", target);
 
-        Ok(self.client.get(target).send().await?.error_for_status()?.bytes().await?.to_vec())
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.bytes().await?.to_vec())
     }
-    pub async fn apply(&self, action: &tpex::Action) -> reqwest::Result<u64> {
+    pub async fn apply(&self, action: &tpex::Action) -> Result<u64> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
 
-        self.client.patch(target).json(action).send().await?.error_for_status()?.json().await
+        Ok(Self::check_response(self.client.patch(target).json(action).send().await?).await?.json().await?)
     }
-    pub async fn get_token(&self, args: &TokenPostArgs) -> reqwest::Result<TokenInfo> {
+    pub async fn get_token(&self, args: &TokenPostArgs) -> Result<TokenInfo> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        self.client.post(target).json(args).send().await?.error_for_status()?.json().await
+        Ok(Self::check_response(self.client.post(target).json(args).send().await?).await?.json().await?)
     }
-    pub async fn create_token(&self, args: &TokenPostArgs) -> reqwest::Result<Token> {
+    pub async fn create_token(&self, args: &TokenPostArgs) -> Result<Token> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        self.client.post(target).json(args).send().await?.error_for_status()?.json().await
+        Ok(Self::check_response(self.client.post(target).json(args).send().await?).await?.json().await?)
     }
-    pub async fn delete_token(&self, args: &TokenPostArgs) -> reqwest::Result<()> {
+    pub async fn delete_token(&self, args: &TokenPostArgs) -> Result<()> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        self.client.delete(target).json(args).send().await?.error_for_status()?.json().await
+        Ok(Self::check_response(self.client.delete(target).json(args).send().await?).await?.json().await?)
     }
 }
 
@@ -76,7 +103,7 @@ impl Mirrored {
         state.replay(&mut buf).await.expect("State unable to replay");
         state.downgrade()
     }
-    pub async fn apply(&self, action: tpex::Action) -> Result<u64, reqwest::Error> {
+    pub async fn apply(&self, action: tpex::Action) -> Result<u64> {
         // The remote could be desynced, so we send our update
         let id = self.remote.apply(&action).await?;
         drop(self.sync().await);
