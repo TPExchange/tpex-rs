@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 
-use crate::{commands::{list_assets, player_id, user_id}, trade::Action};
+use crate::commands::{list_assets, player_id, user_id};
+use tpex::Action;
 use poise::{serenity_prelude::{self as serenity, CreateInteractionResponseMessage, CreateMessage}, CreateReply};
 
 use super::{Context, Error};
@@ -38,8 +39,9 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
         let next_id;
         let withdrawal;
 
-        let data = ctx.data().read().await;
-        let mut withdrawals = data.state.get_withdrawals();
+        // This will lock the entire data stream, so be careful
+        let data = ctx.data().sync().await;
+        let mut withdrawals = data.get_withdrawals();
         let user = player_id(ctx.author());
         withdrawals.retain(|_, x| x.player == user);
 
@@ -98,7 +100,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             },
             x if x == &expedite_button_id => {
                 // Check to make sure the user is aware this isn't free
-                let fee = ctx.data().read().await.state.expedite_fee().to_string();
+                let fee = ctx.data().sync().await.expedite_fee().to_string();
 
                 // Because discord doesn't bother to tell us if the use canceled, this must be done as a task
                 let serenity_ctx = ctx.serenity_context().clone();
@@ -115,11 +117,11 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
                     }
                     check_modal.interaction.create_response(&serenity_ctx.http, serenity::CreateInteractionResponse::Acknowledge).await?;
                     // We don't need to check further, as ids are unique, and so the only way a user could get this is if they satisfied the earlier name filter
-                    data.write().await.run_action(Action::Expedited { target: curr_id }).await?;
+                    data.apply(Action::Expedited { target: curr_id }).await?;
                     // DM all bankers
                     //
                     // TODO: parallelise
-                    for id in data.read().await.state.get_bankers() {
+                    for id in data.sync().await.get_bankers() {
                         let user = user_id(&id).expect("Unable to parse banker ID").to_user(&serenity_ctx.http).await.expect("Unable to contact banker.");
                         user.dm(&serenity_ctx, CreateMessage::new().content("New expedited order!")).await.expect("Unable to DM banker.");
                     }
@@ -171,7 +173,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
             serenity::CreateEmbed::new()
             .field("Name", "", true)
             .field("Count", "", true)
-            .field("Fees", ctx.data().read().await.state.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + " coin(s)", false)
+            .field("Fees", ctx.data().sync().await.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + " coin(s)", false)
         )
         .components(components)
     ).await?;
@@ -208,7 +210,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                 let data = ctx.data().clone();
                 // Make a copy so that they can't claim some future withdrawal
                 let basket = basket.lock().await.clone();
-                let fee = data.read().await.state.calc_withdrawal_fee(&basket)?.to_string();
+                let fee = data.sync().await.calc_withdrawal_fee(&basket)?.to_string();
                 let serenity_ctx = ctx.serenity_context().clone();
                 let player = player_id(ctx.author());
                 tokio::spawn(async move {
@@ -225,7 +227,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                     }
 
                     // Try to withdraw the items
-                    match data.write().await.run_action(Action::WithdrawlRequested { player, assets: basket.clone() }).await {
+                    match data.apply(Action::WithdrawlRequested { player, assets: basket.clone() }).await {
                         Ok(withdraw_id) => {
                             check_modal.interaction.create_response(serenity_ctx.http, serenity::CreateInteractionResponse::UpdateMessage(CreateInteractionResponseMessage::new()
                                 .components(Vec::new())
@@ -273,7 +275,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                         }
 
                         CreateInteractionResponseMessage::default()
-                        .add_embed(list_assets(data.read().await.borrow(), &basket)?)
+                        .add_embed(list_assets(data.sync().await.borrow(), &basket)?)
                         .ephemeral(true)
                     };
 

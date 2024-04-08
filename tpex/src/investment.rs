@@ -9,7 +9,7 @@ struct Investment {
     count: u64
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Default, Debug, Serialize, Clone)]
 pub struct InvestmentTracker {
     // These three tables must be kept consistent
     asset_investments: std::collections::HashMap<AssetId, std::collections::HashMap<PlayerId, u64>>,

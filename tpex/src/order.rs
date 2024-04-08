@@ -43,7 +43,7 @@ pub enum CancelResult {
     SellOrder{player: PlayerId, refunded_asset: AssetId, refund_count: u64}
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Clone)]
 pub struct OrderTracker {
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 
@@ -60,7 +60,7 @@ struct MatchResult<T> {
     data: T
 }
 impl OrderTracker {
-    pub fn get_order(&self, id: u64) -> Option<PendingOrder> { self.orders.get(&id).cloned() }
+    pub fn get_order(&self, id: u64) -> Result<PendingOrder, Error> { self.orders.get(&id).cloned().ok_or(Error::InvalidId { id }) }
     pub fn get_all(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.orders.clone() }
     /// Prices for an asset, returns (price, amount) in (buy, sell)
     pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<u64, u64>, std::collections::BTreeMap<u64, u64>) {

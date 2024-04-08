@@ -1,7 +1,8 @@
 use itertools::Itertools;
 use poise::{serenity_prelude::{self as serenity, CreateEmbed, CreateInteractionResponseMessage}, CreateReply};
 
-use crate::{commands::player_id, trade::Action};
+use crate::commands::player_id;
+use tpex::Action;
 
 use super::{Context, Error};
 // Commands that handle orders
@@ -76,7 +77,7 @@ async fn buy(ctx: Context<'_>,
             },
             x if x == &buy_id => {
                 // Place the order
-                match ctx.data().write().await.run_action(Action::BuyOrder { player: player_id(ctx.author()), asset: item, count: amount, coins_per }).await {
+                match ctx.data().apply(Action::BuyOrder { player: player_id(ctx.author()), asset: item, count: amount, coins_per }).await {
                     Ok(id) => {
                         mci.create_response(ctx, serenity::CreateInteractionResponse::UpdateMessage(CreateInteractionResponseMessage::new()
                             .components(Vec::new())
@@ -167,7 +168,7 @@ async fn sell(ctx: Context<'_>,
             },
             x if x == &sell_id => {
                 // Place the order
-                match ctx.data().write().await.run_action(Action::SellOrder { player: player_id(ctx.author()), asset: item, count: amount, coins_per }).await {
+                match ctx.data().apply(Action::SellOrder { player: player_id(ctx.author()), asset: item, count: amount, coins_per }).await {
                     Ok(id) => {
                         mci.create_response(ctx, serenity::CreateInteractionResponse::UpdateMessage(CreateInteractionResponseMessage::new()
                             .components(Vec::new())
@@ -194,7 +195,7 @@ async fn price(ctx: Context<'_>,
     #[description = "The item you want to check the price for"]
     item: String
 ) -> Result<(), Error> {
-    let (buy_levels, sell_levels) = ctx.data().read().await.state.get_prices(&item);
+    let (buy_levels, sell_levels) = ctx.data().sync().await.get_prices(&item);
     ctx.send(CreateReply::default()
         .content(format!("Prices for {item}:"))
         .embed(CreateEmbed::new()
@@ -219,16 +220,12 @@ async fn cancel(ctx: Context<'_>,
     #[description = "The id for the order"]
     id: u64
 ) -> Result<(), Error> {
-    let Some(order) = ctx.data().read().await.state.get_order(id)
-    else {
-        ctx.reply("No such order").await?;
-        return Ok(());
-    };
+    let order = ctx.data().sync().await.get_order(id)?;
     if order.player == player_id(ctx.author()) {
         ctx.reply("This is not your order. Recheck the id?").await?;
         return Ok(());
     }
-    ctx.data().write().await.run_action(Action::CancelOrder { target_id: id }).await?;
+    ctx.data().apply(Action::CancelOrder { target_id: id }).await?;
     ctx.reply("Order cancelled").await?;
     Ok(())
 }
@@ -256,8 +253,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
         let next_id;
         let order;
 
-        let data = ctx.data().read().await;
-        let mut orders = data.state.get_orders();
+        let mut orders = ctx.data().sync().await.get_orders();
         let user = player_id(ctx.author());
         orders.retain(|_, x| x.player == user);
 
@@ -298,7 +294,6 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             )
             .components(vec![components.clone()])
         ).await?;
-        drop(data);
 
         let Some(mci) = serenity::ComponentInteractionCollector::new(ctx)
             .author_id(ctx.author().id)
@@ -323,7 +318,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             x if x == &cancel_button_id => {
                 mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // Since the IDs are unique, there's no way a user could have got here without owning the order
-                ctx.data().write().await.run_action(Action::CancelOrder { target_id: curr_id }).await?;
+                ctx.data().apply(Action::CancelOrder { target_id: curr_id }).await?;
             }
             x if x == &refresh_button_id => { mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?; },
             _ => ()

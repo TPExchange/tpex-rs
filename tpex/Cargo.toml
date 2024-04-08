@@ -1,0 +1,13 @@
+[package]
+name = "tpex"
+version = "0.1.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "^1.36.0", features = ["full"] }
+serde = { version = "^1.0", features = ["std", "derive"] }
+serde_json = "^1.0.114"
+itertools = "^0.12.1"
+chrono = { version = "^0.4.35", features = ["serde"] }

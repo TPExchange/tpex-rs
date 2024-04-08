@@ -3,7 +3,7 @@ use serde::Serialize;
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Default, Debug, Serialize, Clone)]
 pub struct BalanceTracker {
     balances: std::collections::HashMap<PlayerId, u64>,
     assets: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
