@@ -8,7 +8,7 @@ use tpex::{Action, PlayerId};
 
 use super::{player_id, Context, Error};
 // Commands that handle withdrawals
-#[poise::command(slash_command, ephemeral, subcommands("raw", "deposit", "complete", "current", "authorise"), check = check)]
+#[poise::command(slash_command, ephemeral, subcommands("raw", "deposit", "complete", "current", "authorise", "undeposit"), check = check)]
 pub async fn banker(_ctx: Context<'_>) -> Result<(), Error> { panic!("Banker metacommand called."); }
 
 async fn check(ctx: Context<'_>) -> Result<bool, Error> {

@@ -2,7 +2,7 @@ mod withdraw;
 mod order;
 mod banker;
 
-use tpex::{AssetId, PlayerId};
+use tpex::{AssetId, PlayerId, Auditable};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
 
@@ -104,6 +104,20 @@ async fn state_info(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Get a list of everything in the bank
+#[poise::command(slash_command,ephemeral)]
+async fn audit(ctx: Context<'_>) -> Result<(), Error> {
+    let audit = ctx.data().sync().await.soft_audit();
+    ctx.send(poise::CreateReply::default()
+        .content(format!("{} coins", audit.coins))
+        .embed(CreateEmbed::new()
+            .field("Name", audit.assets.keys().join("\n"), true)
+            .field("Count", audit.assets.values().join("\n"), true)
+        )
+    ).await?;
+    Ok(())
+}
+
 fn list_assets(state: &tpex::State, assets: &std::collections::HashMap<AssetId, u64>) -> Result<CreateEmbed, Error> {
     Ok(
         CreateEmbed::new()
@@ -122,6 +136,7 @@ pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<tpex_api::Mirrored>, 
         txlog(),
         restricted(),
         state_info(),
+        audit(),
 
         withdraw::withdraw(),
         order::order(),

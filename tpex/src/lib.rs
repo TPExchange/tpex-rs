@@ -796,30 +796,22 @@ impl State {
             action: action.clone(),
         };
         let mut line = serde_json::to_string(&wrapped_action).expect("Cannot serialise action");
-        let res;
         // We can soft audit, as the last one was checked as required
         if let Some(expected) = wrapped_action.action.adjust_audit(self.soft_audit()) {
-            res = self.apply_inner(self.next_id, wrapped_action.action);
+            self.apply_inner(self.next_id, wrapped_action.action)?;
             let post = self.hard_audit();
             if expected != post {
                 panic!("Failed audit on {line}: expected {expected:?} vs actual {post:?}");
             }
         }
         else {
-            res = self.apply_inner(self.next_id, wrapped_action.action);
+            self.apply_inner(self.next_id, wrapped_action.action)?;
         }
         line.push('\n');
-        match res {
-            Ok(()) => {
-                self.next_id += 1;
-                out.write_all(line.as_bytes()).await.expect("Could not write to log, must immediately stop!");
-                out.flush().await.expect("Could not flush to log, must immediately stop!");
-                Ok(id)
-            }
-            Err(e) => {
-                Err(e)
-            }
-        }
+        self.next_id += 1;
+        out.write_all(line.as_bytes()).await.expect("Could not write to log, must immediately stop!");
+        out.flush().await.expect("Could not flush to log, must immediately stop!");
+        Ok(id)
     }
 }
 impl Auditable for State {

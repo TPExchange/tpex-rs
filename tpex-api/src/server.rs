@@ -56,19 +56,14 @@ impl From<tpex::Error> for Error {
 }
 impl axum::response::IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        let (code,msg) = match self {
-            Self::TPEx(err) => (409, err.to_string()),
-            Self::UncontrolledUser => (403, "This action would act on behalf of a different user.".to_owned()),
-            Self::TokenTooLowLevel => (403, "This actions requires a higher permission level".to_owned()),
-            Self::TokenInvalid => (409, "The given token does not exist".to_owned())
+        let (code,err) = match self {
+            Self::TPEx(err) => (409, ErrorInfo{error:err.to_string()}),
+            Self::UncontrolledUser => (403, ErrorInfo{error:"This action would act on behalf of a different user.".to_owned()}),
+            Self::TokenTooLowLevel => (403, ErrorInfo{error:"This actions requires a higher permission level".to_owned()}),
+            Self::TokenInvalid => (409, ErrorInfo{error:"The given token does not exist".to_owned()})
         };
 
-        let mut body = Vec::new();
-        let mut ser = serde_json::Serializer::new(&mut body);
-        let mut err_msg = ser.serialize_map(None).unwrap();
-        err_msg.serialize_entry("error", &msg).unwrap();
-        err_msg.end().unwrap();
-
+        let body = serde_json::to_vec(&err).expect("Unable to serialise error");
 
         let body = axum::body::Body::from(body);
 

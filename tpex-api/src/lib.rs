@@ -40,7 +40,7 @@ impl Remote {
             "Authorization",
             reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token)).expect("Unable to make token header"));
         Remote {
-            client: reqwest::Client::builder().default_headers(headers).build().expect("Una ble to build reqwest client"),
+            client: reqwest::Client::builder().default_headers(headers).build().expect("Unable to build reqwest client"),
             endpoint
         }
     }
