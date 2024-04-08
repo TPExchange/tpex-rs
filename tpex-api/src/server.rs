@@ -8,12 +8,13 @@ use clap::Parser;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use serde::ser::{Serializer, SerializeMap};
 use tpex::{Action, ActionLevel};
+use std::io::Write;
 
 #[derive(clap::Parser)]
 struct Args {
     trades: std::path::PathBuf,
-    endpoint: String,
     db: String,
+    endpoint: String,
     assets: Option<std::path::PathBuf>,
 }
 
@@ -174,6 +175,12 @@ async fn token_delete(
 #[tokio::main]
 async fn main() {
     sqlx::any::install_default_drivers();
+    // Crash on inconsistency
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = writeln!(std::io::stderr(), "{}", info);
+        std::process::exit(1);
+    }));
+
 
     let args = Args::parse();
 

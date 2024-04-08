@@ -1,18 +1,25 @@
 use clap::Parser;
 use poise::serenity_prelude as serenity;
 use tokio::io::AsyncReadExt;
+use std::io::Write;
 
 mod commands;
 
 
 #[derive(clap::Parser)]
 struct Args {
-    assets: Option<std::path::PathBuf>,
     endpoint: String,
+    assets: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
 async fn main() {
+    // Crash on inconsistency
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = writeln!(std::io::stderr(), "{}", info);
+        std::process::exit(1);
+    }));
+
     let args = Args::parse();
     // The code here just starts the discord bot, as we respond to commands
 

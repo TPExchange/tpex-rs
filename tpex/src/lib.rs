@@ -427,7 +427,7 @@ impl State {
         self.asset_info.extend(asset_info);
     }
     /// Get the next line
-    pub fn get_next(&self) -> u64 { self.next_id }
+    pub fn get_next_id(&self) -> u64 { self.next_id }
     /// Get a player's balance
     pub fn get_bal(&self, player: &PlayerId) -> u64 { self.balance.get_bal(player) }
     /// Get a player's assets
@@ -642,7 +642,7 @@ impl State {
                 // Check and take coins from payer...
                 self.balance.commit_coin_removal(&player, n_diamonds.checked_mul(COINS_PER_DIAMOND).ok_or(Error::Overflow)?)?;
                 // ... and give them the diamonds
-                self.balance.commit_coin_add(&player, n_diamonds);
+                self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds);
                 Ok(())
             },
             Action::UpdateRestricted { restricted_assets , ..} => {
@@ -750,7 +750,7 @@ impl State {
         while let Some(line) = trade_file_lines.next_line().await.expect("Could not read line from trade list") {
             let wrapped_action: WrappedAction = serde_json::from_str(&line).expect("Corrupted trade file");
             if wrapped_action.id != self.next_id {
-                panic!("Trade file ID mismatch: action {} found on line {}", wrapped_action.id, self.next_id);
+                panic!("Trade file ID mismatch: action {} found on line {}: {}", wrapped_action.id, self.next_id, line);
             }
             if let Some(new_audit) = wrapped_action.action.adjust_audit(last_audit) {
                 self.apply_inner(self.next_id, wrapped_action.action)?;

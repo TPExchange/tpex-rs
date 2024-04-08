@@ -1,4 +1,5 @@
 mod shared;
+
 use shared::*;
 use tpex::{AssetId, AssetInfo, State};
 
@@ -15,7 +16,7 @@ impl Remote {
             "Authorization",
             reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token)).expect("Unable to make token header"));
         Remote {
-            client: reqwest::Client::builder().default_headers(headers).build().expect("Unable to build reqwest client"),
+            client: reqwest::Client::builder().default_headers(headers).build().expect("Una ble to build reqwest client"),
             endpoint
         }
     }
@@ -23,27 +24,34 @@ impl Remote {
     pub async fn get_state(&self, from: u64) -> reqwest::Result<Vec<u8>> {
         let mut target = self.endpoint.clone();
         target.query_pairs_mut().append_pair("from", &from.to_string());
-        target.path_segments_mut().expect("Unable to nav to /state").push("/state");
+        target.path_segments_mut().expect("Unable to nav to /state").push("state");
+        println!("{:?}", target);
 
-        Ok(self.client.get(target).send().await?.bytes().await?.to_vec())
+        Ok(self.client.get(target).send().await?.error_for_status()?.bytes().await?.to_vec())
     }
     pub async fn apply(&self, action: &tpex::Action) -> reqwest::Result<u64> {
         let mut target = self.endpoint.clone();
-        target.path_segments_mut().expect("Unable to nav to /state").push("/state");
+        target.path_segments_mut().expect("Unable to nav to /state").push("state");
 
-        self.client.patch(target).json(action).send().await?.json().await
+        self.client.patch(target).json(action).send().await?.error_for_status()?.json().await
+    }
+    pub async fn get_token(&self, args: &TokenPostArgs) -> reqwest::Result<TokenInfo> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /token").push("token");
+
+        self.client.post(target).json(args).send().await?.error_for_status()?.json().await
     }
     pub async fn create_token(&self, args: &TokenPostArgs) -> reqwest::Result<Token> {
         let mut target = self.endpoint.clone();
-        target.path_segments_mut().expect("Unable to nav to /token").push("/token");
+        target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        self.client.post(target).json(args).send().await?.json().await
+        self.client.post(target).json(args).send().await?.error_for_status()?.json().await
     }
     pub async fn delete_token(&self, args: &TokenPostArgs) -> reqwest::Result<()> {
         let mut target = self.endpoint.clone();
-        target.path_segments_mut().expect("Unable to nav to /token").push("/token");
+        target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        self.client.delete(target).json(args).send().await?.json().await
+        self.client.delete(target).json(args).send().await?.error_for_status()?.json().await
     }
 }
 
@@ -63,7 +71,7 @@ impl Mirrored {
     }
     pub async fn sync(&self) -> tokio::sync::RwLockReadGuard<State> {
         let mut state = self.state.write().await;
-        let cursor = std::io::Cursor::new(self.remote.get_state(0).await.expect("Could not fetch state"));
+        let cursor = std::io::Cursor::new(self.remote.get_state(state.get_next_id()).await.expect("Could not fetch state"));
         let mut buf = tokio::io::BufReader::new(cursor);
         state.replay(&mut buf).await.expect("State unable to replay");
         state.downgrade()

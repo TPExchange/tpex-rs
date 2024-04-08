@@ -51,7 +51,7 @@ impl Display for Token {
 }
 #[derive(PartialEq, Eq, Debug, sqlx::FromRow)]
 #[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct TokenInfo {
+pub struct TokenInfo {
     pub token: Token,
     pub user: PlayerId,
     pub level: TokenLevel
