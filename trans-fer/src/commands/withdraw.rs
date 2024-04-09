@@ -173,7 +173,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
             serenity::CreateEmbed::new()
             .field("Name", "", true)
             .field("Count", "", true)
-            .field("Fees", ctx.data().sync().await.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + " coin(s)", false)
+            .field("Fees", ctx.data().sync().await.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + "c", false)
         )
         .components(components)
     ).await?;

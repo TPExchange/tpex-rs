@@ -6,8 +6,51 @@ use tpex::Action;
 
 use super::{Context, Error};
 // Commands that handle orders
-#[poise::command(slash_command, ephemeral, subcommands("buy", "sell", "pending", "price", "cancel"))]
+#[poise::command(slash_command, ephemeral, subcommands("buy", "sell", "pending", "price", "cancel", "list"))]
 pub async fn order(_ctx: Context<'_>) -> Result<(), Error> { panic!("order metacommand called!"); }
+
+/// Lists all the items being sold and bought
+#[poise::command(slash_command, ephemeral)]
+async fn list(ctx: Context<'_>) -> Result<(), Error> {
+    let orders = ctx.data().sync().await.get_orders();
+    // btreemap is less efficient, but iters in lexicographical order
+    let mut instant_prices = std::collections::BTreeMap::new();
+    for order in orders.values() {
+        let (buy_price,sell_price) = instant_prices.entry(order.asset.clone()).or_default();
+        match order.order_type {
+            tpex::OrderType::Buy => {
+                if let Some(old_best) = buy_price {
+                    if order.coins_per > *old_best {
+                        *buy_price = Some(order.coins_per);
+                    }
+                }
+                else { *buy_price = Some(order.coins_per); }
+            },
+            tpex::OrderType::Sell => {
+                if let Some(old_best) = sell_price {
+                    if order.coins_per < *old_best {
+                        *sell_price = Some(order.coins_per);
+                    }
+                }
+                else { *sell_price = Some(order.coins_per); }
+            },
+        }
+    }
+    let names = instant_prices.keys().join("\n");
+    let (buy_prices, sell_prices): (Vec<String>, Vec<String>) =
+        instant_prices.into_values()
+        .map(|(b,s)| (b.map(|b| format!("{b}c")).unwrap_or("-".to_string()), (s.map(|b| format!("{b}c")).unwrap_or("-".to_string()))))
+        .unzip()
+        ;
+    ctx.send(CreateReply::default()
+        .embed(CreateEmbed::default()
+            .field("Name", names, true)
+            .field("Buy", buy_prices.join("\n"), true)
+            .field("Sell", sell_prices.join("\n"), true)
+        )
+    ).await?;
+    Ok(())
+}
 
 /// Places a buy order
 #[poise::command(slash_command, ephemeral)]
@@ -45,7 +88,7 @@ async fn buy(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Buy {amount} {item} for {coins_per} Coin(s) each (totalling {total} Coin(s)?"))
+            .description(format!("Buy {amount} {item} for {coins_per}c each (totalling {total}c)?"))
         )
         .components(components)
     ).await?;
@@ -136,7 +179,7 @@ async fn sell(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Sell {amount} {item} for {coins_per} Coin(s) each (totalling {total} Coin(s))?"))
+            .description(format!("Sell {amount} {item} for {coins_per}c each (totalling {total}c)?"))
         )
         .components(components)
     ).await?;

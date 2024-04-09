@@ -12,6 +12,8 @@ mod investment;
 mod order;
 mod withdrawal;
 
+pub use order::OrderType;
+
 pub const COINS_PER_DIAMOND: u64 = 1000;
 pub const DIAMOND_NAME: &str = "diamond";
 const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {

@@ -2,7 +2,8 @@ use serde::Serialize;
 
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize)]pub enum OrderType {
+#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
+pub enum OrderType {
     Buy,
     Sell
 }
