@@ -264,7 +264,7 @@ async fn cancel(ctx: Context<'_>,
     id: u64
 ) -> Result<(), Error> {
     let order = ctx.data().sync().await.get_order(id)?;
-    if order.player == player_id(ctx.author()) {
+    if order.player != player_id(ctx.author()) {
         ctx.reply("This is not your order. Recheck the id?").await?;
         return Ok(());
     }
