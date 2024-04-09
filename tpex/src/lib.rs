@@ -65,6 +65,20 @@ pub struct ActionPermissions {
     pub player: PlayerId
 }
 
+// #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
+// struct Conversion {
+//     from: std::collections::HashMap<AssetId, u64>,
+//     to: std::collections::HashMap<AssetId, u64>
+// }
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
+pub struct AutoConversion {
+    pub from: AssetId,
+    pub n_from: u64,
+    pub to: AssetId,
+    pub n_to: u64
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Action {
     /// Deleted transaction, for when someone does a bad
@@ -203,31 +217,38 @@ pub enum Action {
         count: u64
     },
     /// Update the list of items that the bank is willing to convert
-    UpdateConvertables {
-        convertables: Vec<(AssetId, AssetId)>,
-        banker: PlayerId,
-    },
+    // UpdateConvertables {
+    //     convertables: Vec<Conversion>,
+    //     banker: PlayerId,
+    // },
     /// Give a player access to invested items, and lock away the items needed to replenish the invested stock
-    InstantConvert {
-        player: PlayerId,
-        from: AssetId,
-        to: AssetId,
-        count: u64
-    },
+    // InstantConvert {
+    //     player: PlayerId,
+    //     from: AssetId,
+    //     to: AssetId,
+    //     count: u64
+    // },
     /// Used to correct typos
     Undeposit {
         player: PlayerId,
         asset: AssetId,
         count: u64,
         banker: PlayerId
+    },
+    /// Used to normalise items on deposit
+    UpdateAutoConvert {
+        conversions: Vec<AutoConversion>,
+        banker: PlayerId
     }
 }
 impl Action {
     fn adjust_audit(&self, mut audit: Audit) -> Option<Audit> {
         match self {
-            Action::Deposit { asset, count, .. } => {
-                audit.add_asset(asset.clone(), *count);
-                Some(audit)
+            Action::Deposit { .. } => {
+                // Autoconversion messes this up
+                None
+                // audit.add_asset(asset.clone(), *count);
+                // Some(audit)
             },
             Action::Undeposit {asset, count, .. } => {
                 audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");
@@ -397,7 +418,7 @@ pub struct State {
     next_id: u64,
     asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     fees: UpdateBankPrices,
-    convertables: std::collections::HashSet<(AssetId, AssetId)>,
+    auto_convertables: std::collections::HashMap<AssetId, AutoConversion>,
 
     restricted_assets: std::collections::HashSet<AssetId>,
     authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
@@ -424,7 +445,7 @@ impl Default for State {
             next_id: 1,
             bankers: [PlayerId::the_bank()].into_iter().collect(),
             investables: Default::default(),
-            convertables: Default::default(),
+            auto_convertables: Default::default(),
             balance: Default::default(),
             investment: Default::default(),
             order: Default::default(),
@@ -486,16 +507,17 @@ impl State {
             Action::Deposit { banker, .. } |
             Action::UpdateBankPrices { banker, .. } |
             Action::UpdateBankers { banker, .. } |
-            Action::UpdateConvertables { banker, .. } |
+            // Action::UpdateConvertables { banker, .. } |
             Action::UpdateInvestables { banker, .. } |
             Action::UpdateRestricted { banker, .. } |
             Action::WithdrawlCompleted { banker, .. } |
-            Action::Undeposit { banker, .. }
+            Action::Undeposit { banker, .. } |
+            Action::UpdateAutoConvert { banker, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
 
             Action::BuyCoins { player, .. } |
             Action::BuyOrder { player, .. } |
-            Action::InstantConvert { player, .. }  |
+            // Action::InstantConvert { player, .. }  |
             Action::Invest { player, .. } |
             Action::SellCoins { player, .. } |
             Action::SellOrder { player, .. } |
@@ -545,9 +567,16 @@ impl State {
 
         match action {
             Action::Deleted{..} => Ok(()),
-            Action::Deposit { player, asset, count, .. } => {
+            Action::Deposit { player, asset, mut count, .. } => {
                 if !self.asset_info.contains_key(&asset) {
                     return Err(Error::UnknownAsset { asset });
+                }
+                if let Some(conversion) = self.auto_convertables.get(&asset) {
+                    let n_to_convert = count / conversion.n_from;
+                    count -= n_to_convert;
+                    let n_result = n_to_convert * conversion.n_to;
+
+                    self.balance.commit_asset_add(&player, &conversion.to, n_result);
                 }
                 self.balance.commit_asset_add(&player, &asset, count);
 
@@ -728,6 +757,7 @@ impl State {
                 self.investment.try_remove_investment(&player, &asset, count)?;
                 Ok(())
             },
+            /*
             Action::InstantConvert { from, to, count, player } => {
                 // BUG: will fail audit
                 // Check convertable
@@ -759,7 +789,15 @@ impl State {
             Action::UpdateConvertables { convertables, .. } => {
                 self.convertables = convertables.into_iter().collect();
                 Ok(())
-            }
+            } */
+            Action::UpdateAutoConvert { conversions, .. } => {
+                self.auto_convertables =
+                    conversions.into_iter()
+                    // Get the `from` asset for each conversion for quick lookup
+                    .map(|conversion| (conversion.from.clone(), conversion.clone()))
+                    .collect();
+                Ok(())
+            },
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
