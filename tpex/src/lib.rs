@@ -74,7 +74,8 @@ pub struct ActionPermissions {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct AutoConversion {
     pub from: AssetId,
-    pub n_from: u64,
+    // We don't have n_from, as that would give inconsistent conversion. 1:n only!
+    // pub n_from: u64,
     pub to: AssetId,
     pub n_to: u64
 }
@@ -567,18 +568,16 @@ impl State {
 
         match action {
             Action::Deleted{..} => Ok(()),
-            Action::Deposit { player, asset, mut count, .. } => {
+            Action::Deposit { player, asset, count, .. } => {
                 if !self.asset_info.contains_key(&asset) {
                     return Err(Error::UnknownAsset { asset });
                 }
                 if let Some(conversion) = self.auto_convertables.get(&asset) {
-                    let n_to_convert = count / conversion.n_from;
-                    count -= n_to_convert;
-                    let n_result = n_to_convert * conversion.n_to;
-
-                    self.balance.commit_asset_add(&player, &conversion.to, n_result);
+                    self.balance.commit_asset_add(&player, &conversion.to, count * conversion.n_to);
                 }
-                self.balance.commit_asset_add(&player, &asset, count);
+                else {
+                    self.balance.commit_asset_add(&player, &asset, count)
+                }
 
                 Ok(())
             },
@@ -695,10 +694,21 @@ impl State {
                 Ok(())
             },
             Action::UpdateRestricted { restricted_assets , ..} => {
+                // Check they're valid assets
+                if let Some(asset) =
+                    restricted_assets.iter()
+                    .find(|id| !self.asset_info.contains_key(*id))
+                {
+                    return Err(Error::UnknownAsset { asset: asset.clone() });
+                }
                 self.restricted_assets = std::collections::HashSet::from_iter(restricted_assets);
                 Ok(())
             },
             Action::AuthoriseRestricted { authorisee, asset, new_count, .. } => {
+                // Check it's a valid asset (not necessarily authorisable to enable pre-authorisation)
+                if !self.asset_info.contains_key(&asset) {
+                    return Err(Error::UnknownAsset { asset });
+                }
                 self.authorisations.entry(authorisee).or_default().insert(asset, new_count);
                 Ok(())
             },
@@ -739,6 +749,13 @@ impl State {
                 Ok(())
             },
             Action::UpdateInvestables { assets, .. } => {
+                // Check they're valid assets
+                if let Some(asset) =
+                    assets.iter()
+                    .find(|id| !self.asset_info.contains_key(*id))
+                {
+                    return Err(Error::UnknownAsset { asset: asset.clone() });
+                }
                 self.investables = assets.into_iter().collect();
                 Ok(())
             },
@@ -791,6 +808,15 @@ impl State {
                 Ok(())
             } */
             Action::UpdateAutoConvert { conversions, .. } => {
+                // Check each from and to are valid assets
+                if let Some(asset) =
+                    conversions.iter()
+                    .flat_map(|conv| [&conv.from,&conv.to])
+                    .find(|id| !self.asset_info.contains_key(*id))
+                {
+                    return Err(Error::UnknownAsset { asset: asset.clone() });
+                }
+
                 self.auto_convertables =
                     conversions.into_iter()
                     // Get the `from` asset for each conversion for quick lookup
@@ -810,8 +836,8 @@ impl State {
             if wrapped_action.id != self.next_id {
                 panic!("Trade file ID mismatch: action {} found on line {}: {}", wrapped_action.id, self.next_id, line);
             }
+            self.apply_inner(self.next_id, wrapped_action.action.clone())?;
             if let Some(new_audit) = wrapped_action.action.adjust_audit(last_audit) {
-                self.apply_inner(self.next_id, wrapped_action.action)?;
                 let post = self.hard_audit();
                 if new_audit != post {
                     panic!("Failed audit on {line}: expected {new_audit:?} vs actual {post:?}");
@@ -819,7 +845,6 @@ impl State {
                 last_audit = new_audit;
             }
             else {
-                self.apply_inner(self.next_id, wrapped_action.action)?;
                 // The state has changed, adjust the audit
                 last_audit = self.hard_audit();
             }
@@ -836,16 +861,13 @@ impl State {
             action: action.clone(),
         };
         let mut line = serde_json::to_string(&wrapped_action).expect("Cannot serialise action");
+        self.apply_inner(self.next_id, wrapped_action.action)?;
         // We can soft audit, as the last one was checked as required
-        if let Some(expected) = wrapped_action.action.adjust_audit(self.soft_audit()) {
-            self.apply_inner(self.next_id, wrapped_action.action)?;
+        if let Some(expected) = action.adjust_audit(self.soft_audit()) {
             let post = self.hard_audit();
             if expected != post {
                 panic!("Failed audit on {line}: expected {expected:?} vs actual {post:?}");
             }
-        }
-        else {
-            self.apply_inner(self.next_id, wrapped_action.action)?;
         }
         line.push('\n');
         self.next_id += 1;

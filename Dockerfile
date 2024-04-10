@@ -3,6 +3,7 @@ WORKDIR /opt/tpex
 RUN apk add clang
 COPY . .
 RUN cargo build --release
+RUN cargo test --release
 
 # ---
 
