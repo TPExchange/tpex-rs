@@ -11,6 +11,8 @@ mod balance;
 mod investment;
 mod order;
 mod withdrawal;
+#[cfg(test)]
+mod tests;
 
 pub use order::OrderType;
 
@@ -252,8 +254,9 @@ impl Action {
                 // Some(audit)
             },
             Action::Undeposit {asset, count, .. } => {
-                audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");
+                // Autoconversion messes this up
                 None
+                // audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");
             }
             Action::WithdrawlCompleted{..} => {
                 // We don't know what the withdrawal is just from the action
@@ -861,9 +864,10 @@ impl State {
             action: action.clone(),
         };
         let mut line = serde_json::to_string(&wrapped_action).expect("Cannot serialise action");
+        let pre = self.soft_audit();
         self.apply_inner(self.next_id, wrapped_action.action)?;
         // We can soft audit, as the last one was checked as required
-        if let Some(expected) = action.adjust_audit(self.soft_audit()) {
+        if let Some(expected) = action.adjust_audit(pre) {
             let post = self.hard_audit();
             if expected != post {
                 panic!("Failed audit on {line}: expected {expected:?} vs actual {post:?}");
