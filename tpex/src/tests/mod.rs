@@ -1,4 +1,6 @@
 
+use std::{collections::BTreeMap, fmt::Display};
+
 use super::*;
 
 #[derive(Default)]
@@ -35,7 +37,7 @@ fn create_playerid(id: String) -> PlayerId {
 fn player(n: u64) -> PlayerId { create_playerid(n.to_string()) }
 
 #[tokio::test]
-async fn test_autoconvert_deposit() {
+async fn autoconvert_deposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
@@ -58,7 +60,31 @@ async fn test_autoconvert_deposit() {
 }
 
 #[tokio::test]
-async fn test_invalid_deposit() {
+async fn deposit_undeposit() {
+    let mut state = State::new();
+    let mut sink = WriteSink::default();
+
+    let item = "cobblestone".to_owned();
+
+    state.apply(Action::Deposit {
+        player: player(1),
+        asset: item.clone(),
+        count: 16384,
+        banker: PlayerId::the_bank()
+    }, &mut sink).await.expect("Deposit failed");
+    assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), Some(16384));
+    assert_eq!(state.hard_audit(), Audit{coins: 0, assets: [(item.clone(), 16384)].into_iter().collect()});
+    state.apply(Action::Undeposit {
+        player: player(1),
+        asset: item.clone(),
+        count: 16384,
+        banker: PlayerId::the_bank()
+    }, &mut sink).await.expect("Undeposit failed");
+    assert_eq!(state.hard_audit(), Audit::default());
+}
+
+#[tokio::test]
+async fn invalid_deposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
@@ -71,7 +97,7 @@ async fn test_invalid_deposit() {
 }
 
 #[tokio::test]
-async fn test_undeposit() {
+async fn undeposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
@@ -101,8 +127,25 @@ async fn test_undeposit() {
     assert_eq!(state.hard_audit(), Audit::default());
 }
 
+fn pretty_orders(state: &State) -> impl Display {
+    struct OrderInfo(BTreeMap<u64, PendingOrder>);
+    impl std::fmt::Display for OrderInfo {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            for PendingOrder { id, coins_per, player, amount_remaining, asset, order_type } in self.0.values() {
+                let t = match order_type {
+                    OrderType::Buy => 'B',
+                    OrderType::Sell => 'S',
+                };
+                writeln!(f, "{id} {player} {t}: {amount_remaining} @ {coins_per} of {asset}")?;
+            }
+            Ok(())
+        }
+    }
+    OrderInfo(state.get_orders())
+}
+
 #[tokio::test]
-async fn test_matching() {
+async fn matching() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
@@ -178,12 +221,21 @@ async fn test_matching() {
         count: 16,
         coins_per: 10
     }, &mut sink).await.expect("Sell order 6 failed");
+    state.apply(Action::SellOrder {
+        player: player(2),
+        asset: item.clone(),
+        count: 16,
+        coins_per: 1
+    }, &mut sink).await.expect("Sell order 7 failed");
+    println!("Initial orders:\n{}", pretty_orders(&state));
+
     state.apply(Action::BuyOrder {
         player: player(3),
         asset: item.clone(),
         count: 40,
         coins_per: 4
     }, &mut sink).await.expect("Buy order 1 failed");
+    println!("Post buy 1:\n{}", pretty_orders(&state));
 
     for (p, bal) in [(player(1), 32), (player(2), 8), (player(3), 63960)] {
         assert_eq!(state.get_bal(&p), bal);
@@ -196,16 +248,24 @@ async fn test_matching() {
         count: 80,
         coins_per: 4
     }, &mut sink).await.expect("Buy order 2 failed");
-    for (p, bal) in [(player(1), 32), (player(2), 80), (player(3), 63728)] {
+    println!("Post buy 2:\n{}", pretty_orders(&state));
+
+    for (p, bal) in [(player(1), 80), (player(2), 80), (player(3), 63744)] {
         assert_eq!(state.get_bal(&p), bal);
     }
-    assert_eq!(state.get_assets(&player(3)), [(item.clone(), 80)].into_iter().collect());
+    assert_eq!(state.get_assets(&player(3)), [(item.clone(), 96)].into_iter().collect());
 
     state.apply(Action::SellOrder {
         player: player(2),
         asset: item.clone(),
-        count: 16,
+        count: 24,
         coins_per: 4
-    }, &mut sink).await.expect("Sell order 7 failed");
+    }, &mut sink).await.expect("Sell order 8 failed");
+    println!("Post sell 8:\n{}", pretty_orders(&state));
+
+    for (p, bal) in [(player(1), 80), (player(2), 176), (player(3), 63744)] {
+        assert_eq!(state.get_bal(&p), bal);
+    }
+    assert_eq!(state.get_assets(&player(3)), [(item.clone(), 120)].into_iter().collect());
 
 }
