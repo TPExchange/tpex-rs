@@ -253,7 +253,7 @@ impl Action {
                 // audit.add_asset(asset.clone(), *count);
                 // Some(audit)
             },
-            Action::Undeposit {asset, count, .. } => {
+            Action::Undeposit { .. } => {
                 // Autoconversion messes this up
                 None
                 // audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");

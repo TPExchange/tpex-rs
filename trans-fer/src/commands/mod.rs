@@ -44,6 +44,9 @@ async fn balance(
     Ok(())
 }
 /// Convert your diamonds into coins
+///
+// No longer needed!
+/*
 #[poise::command(slash_command,ephemeral)]
 async fn buycoins(
     ctx: Context<'_>,
@@ -55,16 +58,17 @@ async fn buycoins(
     ctx.reply("Purchase successful").await?;
     Ok(())
 }
-/// Convert your coins into diamonds
+ */
+/// Convert your coins into diamonds, with 1000c for 1 diamond
 #[poise::command(slash_command,ephemeral)]
-async fn sellcoins(
+async fn get_diamonds(
     ctx: Context<'_>,
-    #[description = "The number of diamonds you wish to get"]
+    #[description = "The number of diamonds you wish to get (1000c per diamond)"]
     n_diamonds: u64,
 ) -> Result<(), Error> {
     let player = player_id(ctx.author());
     ctx.data().apply(tpex::Action::SellCoins { player, n_diamonds }).await?;
-    ctx.reply("Purchase successful").await?;
+    ctx.reply(format!("You have succesfully bought {} diamonds for {} coins", n_diamonds, n_diamonds * tpex::COINS_PER_DIAMOND)).await?;
     Ok(())
 }
 /// Get the machine-readable list of all transactions
@@ -131,8 +135,7 @@ fn list_assets(state: &tpex::State, assets: &std::collections::HashMap<AssetId, 
 pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<tpex_api::Mirrored>, Error>> {
     vec![
         balance(),
-        buycoins(),
-        sellcoins(),
+        get_diamonds(),
         txlog(),
         restricted(),
         state_info(),

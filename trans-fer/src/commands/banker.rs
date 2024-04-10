@@ -54,7 +54,10 @@ pub async fn deposit(
     let player = player_id(&player);
     let banker = player_id(ctx.author());
     let response = format!("Deposited {count} {asset} for {player}.");
-    ctx.data().apply(Action::Deposit { player, asset, count, banker }).await?;
+    ctx.data().apply(Action::Deposit { player: player.clone(), asset: asset.clone(), count, banker }).await?;
+    if asset == tpex::DIAMOND_NAME {
+        ctx.data().apply(Action::BuyCoins { player, n_diamonds: count * tpex::COINS_PER_DIAMOND }).await?;
+    }
     ctx.reply(response).await?;
     Ok(())
 }
