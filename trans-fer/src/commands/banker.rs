@@ -55,6 +55,11 @@ async fn update(ctx: Context<'_>,
     scale: u64
 ) -> Result<(), Error> {
     let response = format!("Will now convert each {} into {} {}", from, scale, to);
+
+    // Make sure these are real items
+    ctx.data().state.asset_info(&from).await?;
+    ctx.data().state.asset_info(&to).await?;
+
     ctx.data().db.update_autoconversion(AutoConversion{from,to,scale}).await;
     ctx.reply(response).await?;
     Ok(())

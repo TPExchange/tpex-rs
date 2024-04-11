@@ -109,4 +109,8 @@ impl Mirrored {
         drop(self.sync().await);
         Ok(id)
     }
+    // This isn't synced
+    pub async fn asset_info(&self, asset: &AssetId) -> std::result::Result<AssetInfo, tpex::Error> {
+        self.state.read().await.asset_info(asset)
+    }
 }
