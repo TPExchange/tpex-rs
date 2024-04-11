@@ -6,6 +6,20 @@ use tpex::{AssetId, PlayerId, Auditable};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct AutoConversion {
+    pub from: AssetId,
+    // We don't have n_from, as that would give inconsistent conversion. 1:n only!
+    // pub n_from: u64,
+    pub to: AssetId,
+    pub n_to: u64
+}
+
+struct Data {
+    state: tpex_api::Mirrored,
+    conversions: tokio::sync::RwLock<std::collections::HashMap<AssetId, AutoConversion>>
+}
+
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, std::sync::Arc<tpex_api::Mirrored>, Error>;
 
