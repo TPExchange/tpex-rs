@@ -4,6 +4,7 @@ mod banker;
 
 use std::str::FromStr;
 
+use sqlx::migrate;
 use tpex::{AssetId, PlayerId, Auditable};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
@@ -23,7 +24,9 @@ pub struct Database {
 impl Database {
     pub async fn new(url: &str) -> Database {
         let opt = sqlx::sqlite::SqliteConnectOptions::from_str(url).expect("Invalid database URL").create_if_missing(true);
-        Database { pool: sqlx::SqlitePool::connect_with(opt).await.expect("Could not connect to database") }
+        let pool = sqlx::SqlitePool::connect_with(opt).await.expect("Could not connect to database");
+        sqlx::migrate!("../migrations/trans-fer").run(&pool).await.expect("Failed to init db");
+        Database { pool }
     }
     async fn update_autoconversion(&self, autoconv: AutoConversion) {
         let scale: u32 = autoconv.scale.try_into().expect("Scale is wayyy to big");
