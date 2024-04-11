@@ -9,6 +9,7 @@ mod commands;
 #[derive(clap::Parser)]
 struct Args {
     endpoint: String,
+    db: String,
     assets: Option<std::path::PathBuf>,
 }
 
@@ -32,9 +33,13 @@ async fn main() {
 
     let discord_token = std::env::var("DISCORD_TOKEN").expect("Missing DISCORD_TOKEN environment variable");
 
+
     // Discord setup
     let mut client = {
-        let data = tpex_api::Mirrored::new(remote_url, remote_token);
+        let data = commands::Data{
+            state: tpex_api::Mirrored::new(remote_url, remote_token),
+            db: commands::Database::new(&args.db).await
+        };
         if let Some(asset_path) = args.assets {
             let mut assets = String::new();
             tokio::fs::File::open(asset_path).await.expect("Unable to open asset info").read_to_string(&mut assets).await.expect("Unable to read asset list");
@@ -44,7 +49,7 @@ async fn main() {
         let intents = serenity::GatewayIntents::non_privileged();
 
         let framework = poise::Framework::builder()
-        .options(poise::FrameworkOptions::<std::sync::Arc<tpex_api::Mirrored>, commands::Error> {
+        .options(poise::FrameworkOptions {
             commands: commands::get_commands(),
             ..Default::default()
         })

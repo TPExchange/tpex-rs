@@ -2,26 +2,72 @@ mod withdraw;
 mod order;
 mod banker;
 
+use std::str::FromStr;
+
 use tpex::{AssetId, PlayerId, Auditable};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
 
 #[derive(Debug, PartialEq, Clone, Default)]
+#[derive(sqlx::FromRow)]
 pub struct AutoConversion {
-    pub from: AssetId,
     // We don't have n_from, as that would give inconsistent conversion. 1:n only!
-    // pub n_from: u64,
+    pub from: AssetId,
     pub to: AssetId,
-    pub n_to: u64
+    pub scale: u64
 }
 
-struct Data {
-    state: tpex_api::Mirrored,
-    conversions: tokio::sync::RwLock<std::collections::HashMap<AssetId, AutoConversion>>
+pub struct Database {
+    pool: sqlx::SqlitePool
+}
+impl Database {
+    pub async fn new(url: &str) -> Database {
+        let opt = sqlx::sqlite::SqliteConnectOptions::from_str(url).expect("Invalid database URL").create_if_missing(true);
+        Database { pool: sqlx::SqlitePool::connect_with(opt).await.expect("Could not connect to database") }
+    }
+    async fn update_autoconversion(&self, autoconv: AutoConversion) {
+        let scale: u32 = autoconv.scale.try_into().expect("Scale is wayyy to big");
+        sqlx::query!(r#"INSERT INTO autoconversions(asset_from, asset_to, scale) VALUES (?,?,?)"#, autoconv.from, autoconv.to, scale)
+            .execute(&self.pool).await
+            .expect("Unable to update autoconversion");
+    }
+    async fn delete_autoconversion(&self, from: &AssetId) {
+        sqlx::query!(r#"DELETE FROM autoconversions WHERE asset_from = ?"#, from)
+            .execute(&self.pool).await
+            .expect("Unable to delete autoconversion");
+    }
+    async fn get_autoconversion(&self, from: &AssetId) -> Option<AutoConversion> {
+        let res = sqlx::query!(r#"SELECT asset_from,asset_to,scale FROM autoconversions WHERE asset_from=?"#, from)
+            .fetch_one(&self.pool).await;
+
+        match res {
+            Ok(record) => Some(AutoConversion{from: record.asset_from, to: record.asset_to, scale: record.scale as u64}),
+            Err(sqlx::Error::RowNotFound) => None,
+            Err(err) => panic!("Failed to read row: {err}")
+        }
+    }
+    async fn list_autoconversions(&self) -> Vec<AutoConversion> {
+        sqlx::query!(r#"SELECT asset_from,asset_to,scale FROM autoconversions"#)
+            .fetch_all(&self.pool).await
+            .expect("Unable to list autoconverions")
+            .into_iter()
+            .map(|record| AutoConversion{from: record.asset_from, to: record.asset_to, scale: record.scale as u64})
+            .collect()
+    }
+}
+
+pub struct Data {
+    pub state: tpex_api::Mirrored,
+    pub db: Database
+}
+impl std::ops::Deref for Data {
+    type Target = tpex_api::Mirrored;
+
+    fn deref(&self) -> &Self::Target { &self.state }
 }
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, std::sync::Arc<tpex_api::Mirrored>, Error>;
+type Context<'a> = poise::Context<'a, std::sync::Arc<Data>, Error>;
 
 fn player_id(user: &serenity::User) -> PlayerId {
     #[allow(deprecated)]
@@ -143,7 +189,7 @@ fn list_assets(state: &tpex::State, assets: &std::collections::HashMap<AssetId, 
     )
 }
 
-pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<tpex_api::Mirrored>, Error>> {
+pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<Data>, Error>> {
     vec![
         balance(),
         buycoins(),

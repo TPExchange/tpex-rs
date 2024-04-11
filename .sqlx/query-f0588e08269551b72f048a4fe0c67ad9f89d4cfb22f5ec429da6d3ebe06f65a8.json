@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT asset_from,asset_to,scale FROM autoconversions WHERE asset_from=?",
+  "describe": {
+    "columns": [
+      {
+        "name": "asset_from",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "asset_to",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "scale",
+        "ordinal": 2,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f0588e08269551b72f048a4fe0c67ad9f89d4cfb22f5ec429da6d3ebe06f65a8"
+}

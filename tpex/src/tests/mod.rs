@@ -37,29 +37,6 @@ fn create_playerid(id: String) -> PlayerId {
 fn player(n: u64) -> PlayerId { create_playerid(n.to_string()) }
 
 #[tokio::test]
-async fn autoconvert_deposit() {
-    let mut state = State::new();
-    let mut sink = WriteSink::default();
-
-    let from = "diamond_block".to_owned();
-    let to = "diamond".to_owned();
-
-    state.apply(Action::UpdateAutoConvert {
-        conversions: vec![AutoConversion{from:from.clone(),to:to.clone(),n_to:9}],
-        banker: PlayerId::the_bank()
-    }, &mut sink).await.expect("Autoconvert apply failed");
-    state.apply(Action::Deposit {
-        player: player(1),
-        asset: from.clone(),
-        count: 49,
-        banker: PlayerId::the_bank()
-    }, &mut sink).await.expect("Autoconvert deposit failed");
-    assert_eq!(state.get_assets(&player(1)).get(&from).cloned(), None);
-    assert_eq!(state.get_assets(&player(1)).get(&to).cloned(), Some(441));
-    assert_eq!(state.hard_audit(), Audit{coins: 0, assets: [(to, 441)].into_iter().collect()});
-}
-
-#[tokio::test]
 async fn deposit_undeposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();

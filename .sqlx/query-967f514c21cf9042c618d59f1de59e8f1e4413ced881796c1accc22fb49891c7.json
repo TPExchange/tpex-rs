@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO autoconversions(asset_from, asset_to, scale) VALUES (?,?,?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "967f514c21cf9042c618d59f1de59e8f1e4413ced881796c1accc22fb49891c7"
+}

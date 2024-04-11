@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM autoconversions WHERE asset_from = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c189c9c94f48968f63430b35577416e41ecdec25cf46335118a1e1952149dbca"
+}

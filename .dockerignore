@@ -4,4 +4,4 @@ trades.list
 Cargo.lock
 Dockerfile
 .dockerignore
-tpex-api/debug.db
+debug.db

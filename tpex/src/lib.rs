@@ -86,6 +86,7 @@ pub struct AutoConversion {
 pub enum Action {
     /// Deleted transaction, for when someone does a bad
     Deleted {
+        reason: String,
         banker: PlayerId
     },
     /// Player deposited assets
@@ -137,11 +138,6 @@ pub enum Action {
         count: u64,
         coins_per: u64,
     },
-    // Donation {
-    //     asset: AssetId,
-    //     count: u64,
-    //     banker: PlayerId,
-    // },
     /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
         restricted_assets: Vec<AssetId>,
@@ -238,28 +234,20 @@ pub enum Action {
         count: u64,
         banker: PlayerId
     },
-    /// Used to normalise items on deposit
-    UpdateAutoConvert {
-        conversions: Vec<AutoConversion>,
-        banker: PlayerId
-    }
 }
 impl Action {
     fn adjust_audit(&self, mut audit: Audit) -> Option<Audit> {
         match self {
-            Action::Deposit { .. } => {
-                // Autoconversion messes this up
-                None
-                // audit.add_asset(asset.clone(), *count);
-                // Some(audit)
+            Action::Deposit { asset, count, .. } => {
+                audit.add_asset(asset.clone(), *count);
+                Some(audit)
             },
-            Action::Undeposit { .. } => {
-                // Autoconversion messes this up
-                None
-                // audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");
+            Action::Undeposit { asset, count, .. } => {
+                audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");
+                Some(audit.clone())
             }
             Action::WithdrawlCompleted{..} => {
-                // We don't know what the withdrawal is just from the action
+                // We don't know what the withdrawal is just from the id
                 //
                 // TODO: find a way to track this nicely
                 None
@@ -422,7 +410,6 @@ pub struct State {
     next_id: u64,
     asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     fees: UpdateBankPrices,
-    auto_convertables: std::collections::HashMap<AssetId, AutoConversion>,
 
     restricted_assets: std::collections::HashSet<AssetId>,
     authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
@@ -449,7 +436,6 @@ impl Default for State {
             next_id: 1,
             bankers: [PlayerId::the_bank()].into_iter().collect(),
             investables: Default::default(),
-            auto_convertables: Default::default(),
             balance: Default::default(),
             investment: Default::default(),
             order: Default::default(),
@@ -515,8 +501,7 @@ impl State {
             Action::UpdateInvestables { banker, .. } |
             Action::UpdateRestricted { banker, .. } |
             Action::WithdrawlCompleted { banker, .. } |
-            Action::Undeposit { banker, .. } |
-            Action::UpdateAutoConvert { banker, .. }
+            Action::Undeposit { banker, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
 
             Action::BuyCoins { player, .. } |
@@ -575,12 +560,7 @@ impl State {
                 if !self.asset_info.contains_key(&asset) {
                     return Err(Error::UnknownAsset { asset });
                 }
-                if let Some(conversion) = self.auto_convertables.get(&asset) {
-                    self.balance.commit_asset_add(&player, &conversion.to, count * conversion.n_to);
-                }
-                else {
-                    self.balance.commit_asset_add(&player, &asset, count)
-                }
+                self.balance.commit_asset_add(&player, &asset, count);
 
                 Ok(())
             },
@@ -810,23 +790,6 @@ impl State {
                 self.convertables = convertables.into_iter().collect();
                 Ok(())
             } */
-            Action::UpdateAutoConvert { conversions, .. } => {
-                // Check each from and to are valid assets
-                if let Some(asset) =
-                    conversions.iter()
-                    .flat_map(|conv| [&conv.from,&conv.to])
-                    .find(|id| !self.asset_info.contains_key(*id))
-                {
-                    return Err(Error::UnknownAsset { asset: asset.clone() });
-                }
-
-                self.auto_convertables =
-                    conversions.into_iter()
-                    // Get the `from` asset for each conversion for quick lookup
-                    .map(|conversion| (conversion.from.clone(), conversion.clone()))
-                    .collect();
-                Ok(())
-            },
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
