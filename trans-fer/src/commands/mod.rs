@@ -44,13 +44,10 @@ async fn balance(
     Ok(())
 }
 /// Convert your diamonds into coins
-///
-// No longer needed!
-/*
 #[poise::command(slash_command,ephemeral)]
 async fn buycoins(
     ctx: Context<'_>,
-    #[description = "The number of diamonds you wish to exchange for Coin(s)"]
+    #[description = "The number of diamonds you wish to exchange for Coin(s) (1000c per diamond)"]
     n_diamonds: u64,
 ) -> Result<(), Error> {
     let player = player_id(ctx.author());
@@ -58,10 +55,9 @@ async fn buycoins(
     ctx.reply("Purchase successful").await?;
     Ok(())
 }
- */
 /// Convert your coins into diamonds, with 1000c for 1 diamond
 #[poise::command(slash_command,ephemeral)]
-async fn get_diamonds(
+async fn sellcoins(
     ctx: Context<'_>,
     #[description = "The number of diamonds you wish to get (1000c per diamond)"]
     n_diamonds: u64,
@@ -112,11 +108,12 @@ async fn state_info(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command,ephemeral)]
 async fn audit(ctx: Context<'_>) -> Result<(), Error> {
     let audit = ctx.data().sync().await.soft_audit();
+    let sorted_assets = std::collections::BTreeMap::from_iter(audit.assets);
     ctx.send(poise::CreateReply::default()
         .content(format!("{} coins", audit.coins))
         .embed(CreateEmbed::new()
-            .field("Name", audit.assets.keys().join("\n"), true)
-            .field("Count", audit.assets.values().join("\n"), true)
+            .field("Name", sorted_assets.keys().join("\n"), true)
+            .field("Count", sorted_assets.values().join("\n"), true)
         )
     ).await?;
     Ok(())
@@ -135,7 +132,8 @@ fn list_assets(state: &tpex::State, assets: &std::collections::HashMap<AssetId, 
 pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<tpex_api::Mirrored>, Error>> {
     vec![
         balance(),
-        get_diamonds(),
+        buycoins(),
+        sellcoins(),
         txlog(),
         restricted(),
         state_info(),
