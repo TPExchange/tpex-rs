@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO autoconversions(asset_from, asset_to, scale) VALUES (?,?,?)\n                        ON CONFLICT(asset_from) DO UPDATE SET asset_to=excluded.asset_to,scale=excluded.scale",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "dbb9e4eda8f8c5477c1eb333c5e51a168a9fca588f5ea30a25123e2a91da0611"
+}

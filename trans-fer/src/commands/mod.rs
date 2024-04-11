@@ -4,7 +4,6 @@ mod banker;
 
 use std::str::FromStr;
 
-use sqlx::migrate;
 use tpex::{AssetId, PlayerId, Auditable};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
@@ -30,7 +29,8 @@ impl Database {
     }
     async fn update_autoconversion(&self, autoconv: AutoConversion) {
         let scale: u32 = autoconv.scale.try_into().expect("Scale is wayyy to big");
-        sqlx::query!(r#"INSERT INTO autoconversions(asset_from, asset_to, scale) VALUES (?,?,?)"#, autoconv.from, autoconv.to, scale)
+        sqlx::query!(r#"INSERT INTO autoconversions(asset_from, asset_to, scale) VALUES (?,?,?)
+                        ON CONFLICT(asset_from) DO UPDATE SET asset_to=excluded.asset_to,scale=excluded.scale"#, autoconv.from, autoconv.to, scale)
             .execute(&self.pool).await
             .expect("Unable to update autoconversion");
     }
@@ -160,7 +160,7 @@ async fn restricted(ctx: Context<'_>) -> Result<(), Error> {
 /// Get an info dump of the current state
 #[poise::command(slash_command,ephemeral)]
 async fn state_info(ctx: Context<'_>) -> Result<(), Error> {
-    let state = serde_json::to_string(&*ctx.data().sync().await)?;
+    let state = serde_json::to_string_pretty(&*ctx.data().sync().await)?;
     ctx.send(poise::CreateReply::default()
         .attachment(serenity::CreateAttachment::bytes(state, "state.json"))
     ).await?;
