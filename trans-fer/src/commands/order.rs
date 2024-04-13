@@ -12,6 +12,7 @@ pub async fn order(_ctx: Context<'_>) -> Result<(), Error> { panic!("order metac
 /// Lists all the items being sold and bought
 #[poise::command(slash_command, ephemeral)]
 async fn list(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let orders = ctx.data().sync().await.get_orders();
     // btreemap is less efficient, but iters in lexicographical order
     let mut instant_prices = std::collections::BTreeMap::new();
@@ -62,6 +63,7 @@ async fn buy(ctx: Context<'_>,
     #[description = "The price you want to pay per item"]
     coins_per: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
     let die_time = (ctx.created_at().naive_utc() + LIFETIME).and_utc();
     let die_unix = die_time.timestamp();
@@ -152,6 +154,7 @@ async fn sell(ctx: Context<'_>,
     #[description = "The Coin(s) you want to get per item"]
     coins_per: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
     let die_time = (ctx.created_at().naive_utc() + LIFETIME).and_utc();
     let die_unix = die_time.timestamp();
@@ -238,6 +241,7 @@ async fn price(ctx: Context<'_>,
     #[description = "The item you want to check the price for"]
     item: String
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let (buy_levels, sell_levels) = ctx.data().sync().await.get_prices(&item);
     ctx.send(CreateReply::default()
         .content(format!("Prices for {item}:"))
@@ -263,6 +267,7 @@ async fn cancel(ctx: Context<'_>,
     #[description = "The id for the order"]
     id: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let order = ctx.data().sync().await.get_order(id)?;
     if order.player != player_id(ctx.author()) {
         ctx.reply("This is not your order. Recheck the id?").await?;
@@ -275,6 +280,7 @@ async fn cancel(ctx: Context<'_>,
 
 #[poise::command(slash_command, ephemeral)]
 async fn pending(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let ctx_id = ctx.id();
     let ctx_suffix = format!("_{ctx_id}");
     let prev_button_id = format!("prev{ctx_suffix}");
@@ -347,15 +353,15 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
         else { return Ok(()); };
         match &mci.data.custom_id {
             x if x == &prev_button_id => {
+                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // idk if someone can mess with this, so I'm going to soft check
                 if let Some(id) = prev_id { curr_id = *id; }
-                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 continue;
             },
             x if x == &next_button_id => {
+                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // idk if someone can mess with this, so I'm going to soft check
                 if let Some(id) = next_id { curr_id = *id; }
-                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 continue;
             },
             x if x == &cancel_button_id => {

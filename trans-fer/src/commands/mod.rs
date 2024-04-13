@@ -88,6 +88,8 @@ async fn balance(
     #[description = "Player (Defaults to you)"]
     player: Option<serenity::User>,
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
+
     let player = player.as_ref().unwrap_or(ctx.author());
     let name = player.name.clone();
     let player = player_id(player);
@@ -113,6 +115,7 @@ async fn buycoins(
     #[description = "The number of diamonds you wish to exchange for Coin(s) (1000c per diamond)"]
     n_diamonds: u64,
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let player = player_id(ctx.author());
     ctx.data().apply(tpex::Action::BuyCoins { player, n_diamonds }).await?;
     ctx.reply("Purchase successful").await?;
@@ -125,6 +128,7 @@ async fn sellcoins(
     #[description = "The number of diamonds you wish to get (1000c per diamond)"]
     n_diamonds: u64,
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let player = player_id(ctx.author());
     ctx.data().apply(tpex::Action::SellCoins { player, n_diamonds }).await?;
     ctx.reply(format!("You have succesfully bought {} diamonds for {} coins", n_diamonds, n_diamonds * tpex::COINS_PER_DIAMOND)).await?;
@@ -135,6 +139,7 @@ async fn sellcoins(
 async fn txlog(
     ctx: Context<'_>
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     // Lock read means no trades will be appended while we withdraw: i.e. no partial writes
     let data = ctx.data().remote.get_state(0).await?;
 
@@ -146,6 +151,7 @@ async fn txlog(
 /// Get the list of items that require authorisation to withdraw
 #[poise::command(slash_command,ephemeral)]
 async fn restricted(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let assets = ctx.data().sync().await.get_restricted().join("\n");
     ctx.send(
         poise::CreateReply::default()
@@ -160,6 +166,7 @@ async fn restricted(ctx: Context<'_>) -> Result<(), Error> {
 /// Get an info dump of the current state
 #[poise::command(slash_command,ephemeral)]
 async fn state_info(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let state = serde_json::to_string_pretty(&*ctx.data().sync().await)?;
     ctx.send(poise::CreateReply::default()
         .attachment(serenity::CreateAttachment::bytes(state, "state.json"))
@@ -170,6 +177,7 @@ async fn state_info(ctx: Context<'_>) -> Result<(), Error> {
 /// Get a list of everything in the bank
 #[poise::command(slash_command,ephemeral)]
 async fn audit(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let audit = ctx.data().sync().await.soft_audit();
     let sorted_assets = std::collections::BTreeMap::from_iter(audit.assets);
     ctx.send(poise::CreateReply::default()
@@ -182,6 +190,41 @@ async fn audit(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// List players in descending order of coin balance
+#[poise::command(slash_command,ephemeral)]
+async fn baltop(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
+    let (names,coins) : (Vec<_>, Vec<_>) = ctx.data().sync().await
+        .get_bals()
+        .into_iter()
+        .sorted_by_key(|(_,key)| *key)
+        .rev()
+        .unzip();
+
+    ctx.send(poise::CreateReply::default()
+        .embed(CreateEmbed::new()
+            .field("Name", names.into_iter().join("\n"), true)
+            .field("Coins", coins.into_iter().join("\n"), true)
+        )
+    ).await?;
+
+    Ok(())
+}
+
+// async fn acknowledge<'a>(ctx: &'a Context<'_>) -> Result<poise::ReplyHandle<'a>, Error> {
+//     Ok(ctx.reply("Processing request...").await?)
+// }
+
+// // List all the bankers
+// #[poise::command(slash_command,ephemeral)]
+// async fn list_bankers(ctx: Context<'_>) -> Result<(), Error> {
+//     let bankers = ctx.data().sync().await
+//         .get_bankers()
+//         .into_iter()
+//         .filter_map(|i| user_id(&i));
+//     // user_id(()).unwrap().to_user(&ctx).await.unwrap().tag()
+// }
+
 fn list_assets(state: &tpex::State, assets: &std::collections::HashMap<AssetId, u64>) -> Result<CreateEmbed, Error> {
     Ok(
         CreateEmbed::new()
@@ -192,6 +235,7 @@ fn list_assets(state: &tpex::State, assets: &std::collections::HashMap<AssetId, 
     )
 }
 
+
 pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<Data>, Error>> {
     vec![
         balance(),
@@ -201,6 +245,7 @@ pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<Data>, Error>> {
         restricted(),
         state_info(),
         audit(),
+        baltop(),
 
         withdraw::withdraw(),
         order::order(),

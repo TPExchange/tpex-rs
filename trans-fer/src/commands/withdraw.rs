@@ -18,6 +18,8 @@ pub async fn withdraw(_ctx: Context<'_>) -> Result<(), Error> { panic!("withdraw
 /// List your pending withdrawals
 #[poise::command(slash_command,ephemeral)]
 async fn pending(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
+
     let ctx_id = ctx.id();
     let ctx_suffix = format!("_{ctx_id}");
     let prev_button_id = format!("prev{ctx_suffix}");
@@ -137,6 +139,8 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
 /// Begins a withdrawal request
 #[poise::command(slash_command,ephemeral)]
 pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
+
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
     let die_time = (ctx.created_at().naive_utc() + LIFETIME).and_utc();
     let die_unix = die_time.timestamp();
@@ -204,6 +208,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                 return Ok(());
             },
             x if x == &withdraw_id => {
+                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // FIXME: Because discord doesn't bother to tell us if the use canceled, this must be done as a task
 
                 // Check they want to pay!
@@ -248,6 +253,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
 
             },
             x if x == &set_id => {
+                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // Because discord doesn't bother to tell us if the use canceled, this must be done as a task
 
                 // Check they want to pay!

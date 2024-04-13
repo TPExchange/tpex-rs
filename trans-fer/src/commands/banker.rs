@@ -29,6 +29,7 @@ async fn autoconvert(_ctx: Context<'_>) -> Result<(), Error> { panic!("Autoconve
 /// Lists all the autoconversions
 #[poise::command(slash_command,ephemeral, check = check)]
 async fn list(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let list = ctx.data().db.list_autoconversions().await;
     let (froms,tos,scales) : (Vec<_>,Vec<_>,Vec<_>) = list
         .iter()
@@ -54,6 +55,7 @@ async fn update(ctx: Context<'_>,
     #[description = "The number of `to` that each `from` should create"]
     scale: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let response = format!("Will now convert each {} into {} {}", from, scale, to);
 
     // Make sure these are real items
@@ -70,6 +72,7 @@ async fn remove(ctx: Context<'_>,
     #[description = "The asset that will no longer be converted from"]
     from: tpex::AssetId
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let response = format!("Will no longer convert {}", from);
     ctx.data().db.delete_autoconversion(&from).await;
     ctx.reply(response).await?;
@@ -83,6 +86,7 @@ pub async fn raw(
     #[description = "JSON action"]
     command: String,
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let Ok(action) = serde_json::from_str(&command) else {
         ctx.say("Invalid command.").await?;
         return Ok(());
@@ -107,6 +111,7 @@ pub async fn deposit(
     #[description = "The amount of that asset to be deposited, again"]
     count_again: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     if asset != asset_again || count != count_again {
         ctx.reply("Inconsistent asset or count. PLEASE CHECK FOR TYPOS NEXT TIME!!!").await?;
         return Ok(());
@@ -142,6 +147,7 @@ pub async fn undeposit(
     #[description = "The amount of that asset to be removed, again"]
     count_again: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     if asset != asset_again || count != count_again {
         ctx.reply("Typo in asset or count. PLEASE CHECK FOR TYPOS NEXT TIME!!!").await?;
         return Ok(());
@@ -173,6 +179,7 @@ pub async fn reserve(
     #[description = "The amount of that asset to be added"]
     count: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let banker = player_id(ctx.author());
     let response = format!("Added {count} {asset} to the reserve.");
     // Do these back to back, but not necessarily consecutively
@@ -191,12 +198,13 @@ pub async fn complete(
     #[description = "The ID of the deposit to complete"]
     withdrawal_id: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let banker = player_id(ctx.author());
     ctx.data().apply(Action::WithdrawlCompleted { target: withdrawal_id, banker }).await?;
     ctx.reply("Withdrawal completion succeeded.").await?;
     Ok(())
 }
-
+/*
 /// Take profits
 #[poise::command(slash_command,ephemeral, check = check)]
 pub async fn pay(
@@ -204,16 +212,19 @@ pub async fn pay(
     #[description = "The banker to pay"]
     coins: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let banker = player_id(ctx.author());
     ctx.data().apply(Action::TransferCoins { payer: PlayerId::the_bank(), payee: banker, count: coins }).await?;
 
     ctx.reply("Profits taken").await?;
     Ok(())
 }
+*/
 
 /// Gets the next withdrawal that needs to be completed
 #[poise::command(slash_command,ephemeral, check = check)]
 pub async fn current(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let Some(current) = ctx.data().sync().await.get_next_withdrawal()
     else {
         ctx.reply("No withdrawals left.").await?;
@@ -238,6 +249,7 @@ pub async fn authorise(ctx: Context<'_>,
     #[description = "The new amount of that asset to be authorised"]
     new_count: u64
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     ctx.data().apply(Action::AuthoriseRestricted { authorisee: player_id(&player), banker: player_id(ctx.author()), asset, new_count }).await?;
     Ok(())
 }

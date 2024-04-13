@@ -20,7 +20,7 @@ pub const COINS_PER_DIAMOND: u64 = 1000;
 pub const DIAMOND_NAME: &str = "diamond";
 const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
     withdraw_flat: 1000,
-    withdraw_per_stack: 50,
+    withdraw_per_stack: 20,
     expedited: 5000,
     investment_share: 0.5,
     instant_smelt_per_stack: 100
@@ -454,6 +454,8 @@ impl State {
     pub fn get_next_id(&self) -> u64 { self.next_id }
     /// Get a player's balance
     pub fn get_bal(&self, player: &PlayerId) -> u64 { self.balance.get_bal(player) }
+    /// Get all balances
+    pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, u64> { self.balance.get_bals() }
     /// Get a player's assets
     pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> { self.balance.get_assets(player) }
     /// Calculate the withdrawal fees
