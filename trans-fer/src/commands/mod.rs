@@ -201,6 +201,18 @@ async fn baltop(ctx: Context<'_>) -> Result<(), Error> {
         .rev()
         .unzip();
 
+    let names = {
+        let mut new_names = Vec::with_capacity(names.len());
+        for i in names {
+            let name = user_id(&i).map(|x| x.to_user(&ctx));
+            let name = match name { Some(fut) => fut.await.ok(), None => None };
+            #[allow(deprecated)]
+            let name = name.map(|x| x.name).unwrap_or_else(|| i.evil_deref().to_string());
+            new_names.push(name);
+        }
+        new_names
+    };
+
     ctx.send(poise::CreateReply::default()
         .embed(CreateEmbed::new()
             .field("Name", names.into_iter().join("\n"), true)

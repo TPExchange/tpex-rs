@@ -208,7 +208,6 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                 return Ok(());
             },
             x if x == &withdraw_id => {
-                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // FIXME: Because discord doesn't bother to tell us if the use canceled, this must be done as a task
 
                 // Check they want to pay!
@@ -249,11 +248,8 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                     }
                     Ok(())
                 });
-
-
             },
             x if x == &set_id => {
-                mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // Because discord doesn't bother to tell us if the use canceled, this must be done as a task
 
                 // Check they want to pay!
