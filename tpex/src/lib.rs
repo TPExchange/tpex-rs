@@ -24,7 +24,6 @@ const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
     withdraw_per_stack: Coins::from_millicoins(20),
     expedited: Coins::from_millicoins(5000),
     investment_share: 0.5,
-    instant_smelt_per_stack: Coins::from_millicoins(100)
 };
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Default, Debug, Clone, Hash)]
@@ -157,7 +156,6 @@ pub enum Action {
         withdraw_per_stack: Coins,
         expedited: Coins,
         investment_share: f64,
-        instant_smelt_per_stack: Coins,
         banker: PlayerId,
     },
     // TODO: Not sure about these yet, let's see what demand we get
@@ -192,7 +190,7 @@ pub enum Action {
     },
     /// Cancel the remaining assets and coins in a buy or sell order
     CancelOrder {
-        target_id: u64
+        target: u64
     },
     /// Update the list of bankers to the given list
     UpdateBankers {
@@ -416,8 +414,7 @@ struct UpdateBankPrices {
     withdraw_flat: Coins,
     withdraw_per_stack: Coins,
     expedited: Coins,
-    investment_share: f64,
-    instant_smelt_per_stack: Coins
+    investment_share: f64
 }
 
 #[derive(Debug, Clone)]
@@ -538,8 +535,8 @@ impl State {
 
             Action::Expedited { target } =>
                 Ok(ActionPermissions{level: ActionLevel::Normal, player: self.withdrawal.get_withdrawal(*target)?.player.clone()}),
-            Action::CancelOrder { target_id } =>
-                Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target_id)?.player.clone()})
+            Action::CancelOrder { target } =>
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target)?.player.clone()})
 
 
         }
@@ -654,8 +651,8 @@ impl State {
                 self.balance.commit_coin_add(&PlayerId::the_bank(), res.total_fee);
                 Ok(())
             },
-            Action::CancelOrder { target_id } => {
-                match self.order.cancel(target_id)? {
+            Action::CancelOrder { target } => {
+                match self.order.cancel(target)? {
                     order::CancelResult::BuyOrder { player, refund_coins } => {
                         self.balance.commit_coin_add(&player, refund_coins);
                     },
@@ -698,8 +695,8 @@ impl State {
                 self.authorisations.entry(authorisee).or_default().insert(asset, new_count);
                 Ok(())
             },
-            Action::UpdateBankPrices { withdraw_flat, withdraw_per_stack, expedited, investment_share, instant_smelt_per_stack , ..} => {
-                self.fees = UpdateBankPrices{ withdraw_flat, withdraw_per_stack, expedited, investment_share, instant_smelt_per_stack };
+            Action::UpdateBankPrices { withdraw_flat, withdraw_per_stack, expedited, investment_share , ..} => {
+                self.fees = UpdateBankPrices{ withdraw_flat, withdraw_per_stack, expedited, investment_share };
                 Ok(())
             },
             Action::TransferCoins { payer, payee, count } => {

@@ -275,7 +275,7 @@ async fn cancel(ctx: Context<'_>,
         ctx.reply("This is not your order. Recheck the id?").await?;
         return Ok(());
     }
-    ctx.data().apply(Action::CancelOrder { target_id: id }).await?;
+    ctx.data().apply(Action::CancelOrder { target: id }).await?;
     ctx.reply("Order cancelled").await?;
     Ok(())
 }
@@ -369,7 +369,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             x if x == &cancel_button_id => {
                 mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // Since the IDs are unique, there's no way a user could have got here without owning the order
-                ctx.data().apply(Action::CancelOrder { target_id: curr_id }).await?;
+                ctx.data().apply(Action::CancelOrder { target: curr_id }).await?;
             }
             x if x == &refresh_button_id => { mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?; },
             _ => ()

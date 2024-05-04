@@ -231,7 +231,7 @@ async fn matching() {
         coins_per: Coins::from_coins(1)
     }, &mut sink).await.expect("Sell order 5 failed");
     state.apply(Action::CancelOrder {
-        target_id: cancel_me
+        target: cancel_me
     }, &mut sink).await.expect("Cancel sell order 5 failed");
     state.apply(Action::SellOrder {
         player: player(2),
