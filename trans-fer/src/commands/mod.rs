@@ -55,7 +55,7 @@ async fn balance(
     };
     ctx.send(
         poise::CreateReply::default()
-        .content(format!("{} has {} coins.", name, bal))
+        .content(format!("{} has {}.", name, bal))
         .embed(
             serenity::CreateEmbed::new()
             .field("Name", assets.keys().join("\n"), true)
@@ -74,7 +74,7 @@ async fn buycoins(
     ctx.defer_ephemeral().await?;
     let player = player_id(ctx.author());
     ctx.data().apply(tpex::Action::BuyCoins { player, n_diamonds }).await?;
-    ctx.reply("Purchase successful").await?;
+    ctx.reply(format!("You have succesfully bought {} for {} diamonds", Coins::from_diamonds(n_diamonds)?, n_diamonds)).await?;
     Ok(())
 }
 /// Convert your coins into diamonds, with 1000c for 1 diamond
@@ -87,7 +87,7 @@ async fn sellcoins(
     ctx.defer_ephemeral().await?;
     let player = player_id(ctx.author());
     ctx.data().apply(tpex::Action::SellCoins { player, n_diamonds }).await?;
-    ctx.reply(format!("You have succesfully bought {} diamonds for {} coins", n_diamonds, Coins::from_diamonds(n_diamonds)?)).await?;
+    ctx.reply(format!("You have succesfully bought {} diamonds for {}", n_diamonds, Coins::from_diamonds(n_diamonds)?)).await?;
     Ok(())
 }
 /// Get the machine-readable list of all transactions
@@ -137,7 +137,7 @@ async fn audit(ctx: Context<'_>) -> Result<(), Error> {
     let audit = ctx.data().sync().await.soft_audit();
     let sorted_assets = std::collections::BTreeMap::from_iter(audit.assets);
     ctx.send(poise::CreateReply::default()
-        .content(format!("{} coins", audit.coins))
+        .content(audit.coins.to_string())
         .embed(CreateEmbed::new()
             .field("Name", sorted_assets.keys().join("\n"), true)
             .field("Count", sorted_assets.values().join("\n"), true)

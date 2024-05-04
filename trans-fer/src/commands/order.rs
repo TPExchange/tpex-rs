@@ -91,7 +91,7 @@ async fn buy(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Buy {amount} {item} for {coins_per}c each (totalling {total}c)?"))
+            .description(format!("Buy {amount} {item} for {coins_per} each (totalling {total})?"))
         )
         .components(components)
     ).await?;
@@ -184,7 +184,7 @@ async fn sell(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Sell {amount} {item} for {coins_per}c each (totalling {total}c)?"))
+            .description(format!("Sell {amount} {item} for {coins_per} each (totalling {total})?"))
         )
         .components(components)
     ).await?;
