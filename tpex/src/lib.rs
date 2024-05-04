@@ -255,12 +255,12 @@ impl Action {
             },
             Action::BuyCoins { n_diamonds,.. } => {
                 audit.add_coins(Coins::from_diamonds(*n_diamonds).expect("BuyCoins overflow in audit"));
-                audit.sub_asset(DIAMOND_NAME.to_owned(), *n_diamonds as u64);
+                audit.sub_asset(DIAMOND_NAME.to_owned(), *n_diamonds);
                 Some(audit)
             },
             Action::SellCoins { n_diamonds, .. } => {
                 audit.sub_coins(Coins::from_diamonds(*n_diamonds).expect("SellCoins overflow in audit"));
-                audit.add_asset(DIAMOND_NAME.to_owned(), *n_diamonds as u64);
+                audit.add_asset(DIAMOND_NAME.to_owned(), *n_diamonds);
                 Some(audit)
             },
             _ => Some(audit)
@@ -667,7 +667,7 @@ impl State {
             },
             Action::BuyCoins { player, n_diamonds } => {
                 // Check and take diamonds from payer...
-                self.balance.commit_asset_removal(&player,&DIAMOND_NAME.to_owned(), n_diamonds as u64)?;
+                self.balance.commit_asset_removal(&player,&DIAMOND_NAME.to_owned(), n_diamonds)?;
                 // ... and give them the coins
                 self.balance.commit_coin_add(&player, Coins::from_diamonds(n_diamonds).expect("BuyCoins overflow")); // This panic stops inconsistencies
                 Ok(())
@@ -676,7 +676,7 @@ impl State {
                 // Check and take coins from payer...
                 self.balance.commit_coin_removal(&player, Coins::from_diamonds(n_diamonds)?)?;
                 // ... and give them the diamonds
-                self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds as u64);
+                self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds);
                 Ok(())
             },
             Action::UpdateRestricted { restricted_assets , ..} => {

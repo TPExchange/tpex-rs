@@ -85,6 +85,7 @@ impl InvestmentTracker {
 
         Ok(())
     }
+    #[allow(dead_code)]
     pub fn try_mark_busy(&mut self, asset: &AssetId, count: u64) -> Result<(), Error> {
         let amount_invested = self.amount_invested.get(asset).cloned().unwrap_or_default();
         let amount_busy = self.investment_busy.entry(asset.clone());
@@ -100,10 +101,12 @@ impl InvestmentTracker {
         self.current_audit.sub_asset(asset.clone(), count);
         Ok(())
     }
+    #[allow(dead_code)]
     pub fn mark_confirmed(&mut self, player: &PlayerId, asset: &AssetId, count: u64) {
         *self.investment_confirmed.entry(player.clone()).or_default().entry(asset.clone()).or_default() += count;
         self.current_audit.add_asset(asset.clone(), count);
     }
+    #[allow(dead_code)]
     pub fn get_investors(&self, asset: &AssetId) -> std::collections::HashMap<PlayerId, u64> {
         self.asset_investments.get(asset).cloned().unwrap_or_default()
     }

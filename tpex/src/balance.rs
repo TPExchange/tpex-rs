@@ -67,6 +67,7 @@ impl BalanceTracker {
         self.current_audit.sub_asset(asset.clone(), count);
         Ok(())
     }
+    #[allow(dead_code)]
     /// Check if a player can afford to pay
     pub fn check_coin_removal(&self, player: &PlayerId, count: Coins) -> Result<(), Error> {
         // If the player doesn't have an account, they definitely cannot withdraw
