@@ -40,7 +40,7 @@ async fn list(ctx: Context<'_>) -> Result<(), Error> {
     let names = instant_prices.keys().join("\n");
     let (buy_prices, sell_prices): (Vec<String>, Vec<String>) =
         instant_prices.into_values()
-        .map(|(b,s)| (b.map(|b| format!("{b}c")).unwrap_or("-".to_string()), (s.map(|b| format!("{b}c")).unwrap_or("-".to_string()))))
+        .map(|(b,s)| (b.map(|b| format!("{b}")).unwrap_or("-".to_string()), (s.map(|b| format!("{b}")).unwrap_or("-".to_string()))))
         .unzip()
         ;
     ctx.send(CreateReply::default()
