@@ -38,7 +38,7 @@ async fn main() {
     let mut client = {
         let data = commands::Data{
             state: tpex_api::Mirrored::new(remote_url, remote_token),
-            db: commands::Database::new(&args.db).await
+            // db: commands::Database::new(&args.db).await
         };
         if let Some(asset_path) = args.assets {
             let mut assets = String::new();

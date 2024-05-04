@@ -2,7 +2,7 @@ use itertools::Itertools;
 use poise::{serenity_prelude::{self as serenity, CreateEmbed, CreateInteractionResponseMessage}, CreateReply};
 
 use crate::commands::player_id;
-use tpex::Action;
+use tpex::{Action, Coins};
 
 use super::{Context, Error};
 // Commands that handle orders
@@ -61,14 +61,15 @@ async fn buy(ctx: Context<'_>,
     #[description = "The amount you want to order"]
     amount: u64,
     #[description = "The price you want to pay per item"]
-    coins_per: u64
+    coins_per: String
 ) -> Result<(), Error> {
     ctx.defer_ephemeral().await?;
+    let coins_per: Coins = coins_per.parse()?;
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
     let die_time = (ctx.created_at().naive_utc() + LIFETIME).and_utc();
     let die_unix = die_time.timestamp();
 
-    let total = coins_per * amount;
+    let total = coins_per.checked_mul(amount)?;
     let ctx_id = ctx.id();
     let ctx_suffix = format!("_{ctx_id}");
     let buy_id = format!("buy{ctx_suffix}");
@@ -90,7 +91,7 @@ async fn buy(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Buy {amount} {item} for {coins_per}c each (totalling {total}c)?"))
+            .description(format!("Buy {amount} {item} for {coins_per} each (totalling {total})?"))
         )
         .components(components)
     ).await?;
@@ -152,14 +153,15 @@ async fn sell(ctx: Context<'_>,
     #[description = "The amount you want to order"]
     amount: u64,
     #[description = "The Coin(s) you want to get per item"]
-    coins_per: u64
+    coins_per: String
 ) -> Result<(), Error> {
     ctx.defer_ephemeral().await?;
+    let coins_per: Coins = coins_per.parse()?;
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
     let die_time = (ctx.created_at().naive_utc() + LIFETIME).and_utc();
     let die_unix = die_time.timestamp();
 
-    let total = coins_per * amount;
+    let total = coins_per.checked_mul(amount)?;
     let ctx_id = ctx.id();
     let ctx_suffix = format!("_{ctx_id}");
 
@@ -182,7 +184,7 @@ async fn sell(ctx: Context<'_>,
     let ui = ctx.send(CreateReply::default()
         .content(format!("Are you sure you want to do the following? This prompt will expire <t:{die_unix}:R>."))
         .embed(CreateEmbed::new()
-            .description(format!("Sell {amount} {item} for {coins_per}c each (totalling {total}c)?"))
+            .description(format!("Sell {amount} {item} for {coins_per} each (totalling {total})?"))
         )
         .components(components)
     ).await?;
@@ -273,7 +275,7 @@ async fn cancel(ctx: Context<'_>,
         ctx.reply("This is not your order. Recheck the id?").await?;
         return Ok(());
     }
-    ctx.data().apply(Action::CancelOrder { target_id: id }).await?;
+    ctx.data().apply(Action::CancelOrder { target: id }).await?;
     ctx.reply("Order cancelled").await?;
     Ok(())
 }
@@ -367,7 +369,7 @@ async fn pending(ctx: Context<'_>) -> Result<(), Error> {
             x if x == &cancel_button_id => {
                 mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?;
                 // Since the IDs are unique, there's no way a user could have got here without owning the order
-                ctx.data().apply(Action::CancelOrder { target_id: curr_id }).await?;
+                ctx.data().apply(Action::CancelOrder { target: curr_id }).await?;
             }
             x if x == &refresh_button_id => { mci.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await?; },
             _ => ()

@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::Coins;
+
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize)]
@@ -19,7 +21,7 @@ impl std::fmt::Display for OrderType {
 #[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 pub struct PendingOrder {
     pub id: u64,
-    pub coins_per: u64,
+    pub coins_per: Coins,
     pub player: PlayerId,
     pub amount_remaining: u64,
     pub asset: AssetId,
@@ -28,19 +30,19 @@ pub struct PendingOrder {
 
 #[derive(Default)]
 pub struct BuyData {
-    pub coins_refunded: u64,
+    pub coins_refunded: Coins,
     pub assets_instant_matched: u64,
     /// Maps sellers to the amount they're owed
-    pub sellers: std::collections::HashMap<PlayerId, u64>
+    pub sellers: std::collections::HashMap<PlayerId, Coins>
 }
 
 #[derive(Default)]
 pub struct SellData {
-    pub coins_instant_earned: u64,
+    pub coins_instant_earned: Coins,
     pub assets_instant_matched: std::collections::HashMap<PlayerId, u64>
 }
 pub enum CancelResult {
-    BuyOrder{player: PlayerId, refund_coins: u64},
+    BuyOrder{player: PlayerId, refund_coins: Coins},
     SellOrder{player: PlayerId, refunded_asset: AssetId, refund_count: u64}
 }
 
@@ -49,9 +51,9 @@ pub struct OrderTracker {
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 
     /// XXX: this contains cancelled orders, skip over them
-    best_buy: std::collections::HashMap<AssetId, std::collections::BTreeMap<u64, std::collections::VecDeque<u64>>>,
+    best_buy: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
     /// XXX: this contains cancelled orders, skip over them
-    best_sell: std::collections::HashMap<AssetId, std::collections::BTreeMap<u64, std::collections::VecDeque<u64>>>,
+    best_sell: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
 
     current_audit: Audit
 }
@@ -64,7 +66,7 @@ impl OrderTracker {
     pub fn get_order(&self, id: u64) -> Result<PendingOrder, Error> { self.orders.get(&id).cloned().ok_or(Error::InvalidId { id }) }
     pub fn get_all(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.orders.clone() }
     /// Prices for an asset, returns (price, amount) in (buy, sell)
-    pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<u64, u64>, std::collections::BTreeMap<u64, u64>) {
+    pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<Coins, u64>, std::collections::BTreeMap<Coins, u64>) {
         let buy_levels = self.best_buy
             .get(asset)
             .iter()
@@ -128,7 +130,7 @@ impl OrderTracker {
         }
         (amount_remaining, ret)
     }
-    fn iterate_best_buy<'a>(&'a self, asset: &'a AssetId, limit: u64) -> impl Iterator<Item = u64> + 'a {
+    fn iterate_best_buy<'a>(&'a self, asset: &'a AssetId, limit: Coins) -> impl Iterator<Item = u64> + 'a {
         // Get all assets...
         self.best_buy
             // ... only look at the asset in question ...
@@ -143,7 +145,7 @@ impl OrderTracker {
             // ... write out ids within each price point ...
             .flat_map(|(_price, ids)| ids.iter().cloned())
     }
-    fn iterate_best_sell<'a>(&'a self, asset: &'a AssetId, limit: u64) -> impl Iterator<Item = u64> + 'a {
+    fn iterate_best_sell<'a>(&'a self, asset: &'a AssetId, limit: Coins) -> impl Iterator<Item = u64> + 'a {
         // Get all assets...
         self.best_sell
             // ... only look at the asset in question ...
@@ -181,7 +183,7 @@ impl OrderTracker {
     }
 
     #[must_use]
-    pub fn handle_buy(&mut self, id: u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: u64) -> BuyData {
+    pub fn handle_buy(&mut self, id: u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins) -> BuyData {
         let mut ret = BuyData::default();
 
         // Match the orders
@@ -213,9 +215,12 @@ impl OrderTracker {
             // Give the assets ...
             ret.assets_instant_matched += match_res.order_taken;
             // ... if they bought it cheap, give them the difference ...
-            ret.coins_refunded += match_res.order_taken * (coins_per - order.coins_per);
+            ret.coins_refunded.checked_add_assign(
+                coins_per.checked_sub(order.coins_per).expect("Refund difference underflow")
+                .checked_mul(match_res.order_taken).expect("Matched coins overflow")
+            ).expect("Refund accumulator overflow");
             // ... and track the seller
-            *ret.sellers.entry(order.player).or_default() += order.coins_per * match_res.order_taken
+            ret.sellers.entry(order.player).or_default().checked_add_assign(order.coins_per.checked_mul(match_res.order_taken).expect("Coins earnt overflow")).expect("Seller balance overflow");
         }
 
         // If needs be, list the remaining amount
@@ -223,16 +228,16 @@ impl OrderTracker {
             self.best_buy.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
             self.orders.insert(id, PendingOrder{ id, coins_per, player: player.clone(), amount_remaining, asset: asset.clone(), order_type: OrderType::Buy });
             // We are responsible for the coins bound up in the buy order
-            self.current_audit.coins += amount_remaining * coins_per;
+            self.current_audit.add_coins(coins_per.checked_mul(amount_remaining).expect("Buy order remaining coins overflow"));
         }
         // We are no longer responsible for the bought items
-        self.current_audit.sub_asset(asset.clone(), ret.assets_instant_matched).expect("Buy order took non-audited assets");
+        self.current_audit.sub_asset(asset.clone(), ret.assets_instant_matched);
 
         ret
     }
 
     #[must_use]
-    pub fn handle_sell(&mut self, id:u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: u64) -> SellData {
+    pub fn handle_sell(&mut self, id:u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins) -> SellData {
         let mut ret = SellData::default();
 
         // Then match the orders
@@ -262,9 +267,11 @@ impl OrderTracker {
                 }
             };
             // Give the money ...
-            ret.coins_instant_earned += match_res.order_taken * order.coins_per;
+            ret.coins_instant_earned.checked_add_assign(
+                order.coins_per.checked_mul(match_res.order_taken).expect("Sell order instant earned increment overflow")
+            ).expect("Sell order instant earned overflow");
             // ... give the assets ...
-            *ret.assets_instant_matched.entry(order.player).or_default() +=  match_res.order_taken;
+            *ret.assets_instant_matched.entry(order.player).or_default() += match_res.order_taken;
         }
 
         // If needs be, list the remaining amount
@@ -274,7 +281,7 @@ impl OrderTracker {
         }
 
         // We are no longer responsible for the earnt coins
-        self.current_audit.sub_coins(ret.coins_instant_earned).expect("Sell order earned non-audited coins");
+        self.current_audit.sub_coins(ret.coins_instant_earned);
         // We are responsible for the remaining listed items
         self.current_audit.add_asset(asset.clone(), amount_remaining);
 
@@ -285,15 +292,16 @@ impl OrderTracker {
             match found.order_type {
                 // If we found it as a buy...
                 OrderType::Buy => {
+                    let refund_coins = found.coins_per.checked_mul(found.amount_remaining).expect("Order cancel refund overflow");
                     // ... we are no longer responsible for the refunded coins ...
-                    self.current_audit.sub_coins(found.amount_remaining * found.coins_per).expect("Canceled order with unaudited coins");
+                    self.current_audit.sub_coins(refund_coins);
                     // ... and refund the money ...
-                    Ok(CancelResult::BuyOrder { player: found.player, refund_coins: found.amount_remaining * found.coins_per })
+                    Ok(CancelResult::BuyOrder { player: found.player, refund_coins })
                 },
                 // If we found it as a sell...
                 OrderType::Sell => {
                     // ... we are no longer responsible for the refunded assets ...
-                    self.current_audit.sub_asset(found.asset.clone(), found.amount_remaining).expect("Canceled order with unaudited coins");
+                    self.current_audit.sub_asset(found.asset.clone(), found.amount_remaining);
                     // ... and refund the assets
                     Ok(CancelResult::SellOrder { player: found.player, refunded_asset: found.asset, refund_count: found.amount_remaining })
                 }
@@ -313,7 +321,7 @@ impl Auditable for OrderTracker {
         for order in self.orders.values() {
             match order.order_type {
                 // A buy order has taken coins from someone's account
-                OrderType::Buy => new_audit.coins += order.amount_remaining * order.coins_per,
+                OrderType::Buy => new_audit.add_coins(order.coins_per.checked_mul(order.amount_remaining).expect("Hard audit coin increment overflow")),
                 // A buy order has taken assets from someone's account
                 OrderType::Sell => new_audit.add_asset(order.asset.clone(), order.amount_remaining),
             }

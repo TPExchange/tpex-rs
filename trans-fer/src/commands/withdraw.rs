@@ -218,20 +218,31 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                 let serenity_ctx = ctx.serenity_context().clone();
                 let player = player_id(ctx.author());
                 tokio::spawn(async move {
+                    if basket.is_empty() {
+                        let Some(warn_modal) = mci.quick_modal(&serenity_ctx,
+                            serenity::CreateQuickModal::new("Warning")
+                            .short_field("You tried to withdraw an empty basket. Please close this, and add something first!")).await?
+                        else {
+                            return Ok::<(), Error>(())
+                        };
+                        warn_modal.interaction.create_response(serenity_ctx.http, serenity::CreateInteractionResponse::Acknowledge).await?;
+                        return Ok(());
+                    }
+
                     let Some(check_modal) = mci.quick_modal(&serenity_ctx,
                         serenity::CreateQuickModal::new("Are you sure?")
                         .short_field(format!("Type \"{fee}\" (The fee you will pay):"))).await?
                     else {
-                        // ctx.say("Withdrawl canceled!").await?;
+                        // ctx.say("Withdrawal canceled!").await?;
                         return Ok::<(), Error>(())
                     };
                     if check_modal.inputs[0] != fee {
-                        // ctx.say("Incorrect amount entered. Withdrawl canceled!").await?;
+                        // ctx.say("Incorrect amount entered. Withdrawal canceled!").await?;
                         return Ok(());
                     }
 
                     // Try to withdraw the items
-                    match data.apply(Action::WithdrawlRequested { player, assets: basket.clone() }).await {
+                    match data.apply(Action::WithdrawalRequested { player, assets: basket.clone() }).await {
                         Ok(withdraw_id) => {
                             check_modal.interaction.create_response(serenity_ctx.http, serenity::CreateInteractionResponse::UpdateMessage(CreateInteractionResponseMessage::new()
                                 .components(Vec::new())

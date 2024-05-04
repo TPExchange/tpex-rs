@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::Coins;
+
 use super::{AssetId, Audit, Auditable, PlayerId, Error};
 
 #[derive(Debug, Serialize)]
@@ -22,6 +24,24 @@ pub struct InvestmentTracker {
     current_audit: Audit
 }
 impl InvestmentTracker {
+    // /// Distribute the profits among the investors
+    // fn distribute_profit(&mut self, asset: &AssetId, amount: u64) {
+    //     let mut investors = self.investment.get_investors(asset);
+    //     // Let's be fair and not give ourselves all the money
+    //     investors.remove(&PlayerId::the_bank());
+    //     let share = (self.fees.investment_share.mul(amount as f64) / (investors.values().sum::<u64>() as f64)).floor() as u64;
+    //     let mut total_distributed = 0;
+    //     for (investor, shares) in investors {
+    //         let investor_profit = share * shares;
+    //         total_distributed += investor_profit;
+    //         self.balance.commit_coin_add(&investor, investor_profit);
+    //     }
+    //     if total_distributed > amount {
+    //         panic!("Profit distribution imprecision was too bad");
+    //     }
+    //     self.balance.commit_coin_add(&PlayerId::the_bank(), amount - total_distributed);
+    // }
+
     pub fn add_investment(&mut self, player: &PlayerId, asset: &AssetId, count: u64) {
         *self.asset_investments.entry(asset.clone()).or_default().entry(player.clone()).or_default() += count;
         *self.player_investments.entry(player.clone()).or_default().entry(asset.clone()).or_default() += count;
@@ -30,9 +50,9 @@ impl InvestmentTracker {
     }
     pub fn try_remove_investment(&mut self, player: &PlayerId, asset: &AssetId, count: u64) -> Result<(), Error> {
         let std::collections::hash_map::Entry::Occupied(mut player_investment_list) = self.player_investments.entry(player.clone())
-        else { return Err(Error::Overdrawn { asset: Some(asset.clone()), amount_overdrawn: count }) };
+        else { return Err(Error::OverdrawnAsset { asset: asset.clone(), amount_overdrawn: count }) };
         let std::collections::hash_map::Entry::Occupied(mut asset_count) = player_investment_list.get_mut().entry(asset.clone())
-        else { return Err(Error::Overdrawn { asset: Some(asset.clone()), amount_overdrawn: count }) };
+        else { return Err(Error::OverdrawnAsset { asset: asset.clone(), amount_overdrawn: count }) };
 
         let std::collections::hash_map::Entry::Occupied(mut asset_investment_list) = self.asset_investments.entry(asset.clone())
         else { panic!("Investment table corruption: player_investments found but asset missing"); };
@@ -52,7 +72,7 @@ impl InvestmentTracker {
                 }
             }
             None => {
-                return Err(Error::Overdrawn { asset: Some(asset.clone()), amount_overdrawn: count - asset_count.get() })
+                return Err(Error::OverdrawnAsset { asset: asset.clone(), amount_overdrawn: count - asset_count.get() })
             },
             Some(count) => {
                 *asset_count .get_mut() = count;
@@ -61,10 +81,11 @@ impl InvestmentTracker {
         }
 
         // Auditing
-        self.current_audit.sub_asset(asset.clone(), count).expect("Investment should be removable but failed audit");
+        self.current_audit.sub_asset(asset.clone(), count);
 
         Ok(())
     }
+    #[allow(dead_code)]
     pub fn try_mark_busy(&mut self, asset: &AssetId, count: u64) -> Result<(), Error> {
         let amount_invested = self.amount_invested.get(asset).cloned().unwrap_or_default();
         let amount_busy = self.investment_busy.entry(asset.clone());
@@ -77,13 +98,15 @@ impl InvestmentTracker {
         }
         *amount_busy.or_default() += count;
 
-        self.current_audit.sub_asset(asset.clone(), count).expect("Valid investment busy mark failed audit");
+        self.current_audit.sub_asset(asset.clone(), count);
         Ok(())
     }
+    #[allow(dead_code)]
     pub fn mark_confirmed(&mut self, player: &PlayerId, asset: &AssetId, count: u64) {
         *self.investment_confirmed.entry(player.clone()).or_default().entry(asset.clone()).or_default() += count;
         self.current_audit.add_asset(asset.clone(), count);
     }
+    #[allow(dead_code)]
     pub fn get_investors(&self, asset: &AssetId) -> std::collections::HashMap<PlayerId, u64> {
         self.asset_investments.get(asset).cloned().unwrap_or_default()
     }
@@ -126,7 +149,7 @@ impl Auditable for InvestmentTracker {
         }
         // Finally, filter out the empty assets
         total_invested.retain(|_asset, count| *count != 0);
-        let new_audit = Audit{coins: 0, assets: total_invested};
+        let new_audit = Audit{coins: Coins::default(), assets: total_invested};
         // Check to see if this matches our info
         if new_audit != self.current_audit {
             panic!("Investment table inconsistent: recalculated audit differed from soft result");
