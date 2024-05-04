@@ -4,12 +4,12 @@ use crate::Coins;
 
 use super::{AssetId, Audit, Auditable, PlayerId, Error};
 
-#[derive(Debug, Serialize)]
-struct Investment {
-    player: PlayerId,
-    asset: AssetId,
-    count: u64
-}
+// #[derive(Debug, Serialize)]
+// struct Investment {
+//     player: PlayerId,
+//     asset: AssetId,
+//     count: u64
+// }
 
 #[derive(Default, Debug, Serialize, Clone)]
 pub struct InvestmentTracker {
