@@ -1,40 +1,42 @@
 use serde::Serialize;
 
+use crate::Coins;
+
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
 
 #[derive(Default, Debug, Serialize, Clone)]
 pub struct BalanceTracker {
-    balances: std::collections::HashMap<PlayerId, u64>,
+    balances: std::collections::HashMap<PlayerId, Coins>,
     assets: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
 
     current_audit: Audit
 }
 impl BalanceTracker {
     /// Get a player's balance
-    pub fn get_bal(&self, player: &PlayerId) -> u64 {
-        self.balances.get(player).map_or(0, Clone::clone)
+    pub fn get_bal(&self, player: &PlayerId) -> Coins {
+        self.balances.get(player).map_or(Coins::default(), Clone::clone)
     }
     /// Get a player's assets
     pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> {
         self.assets.get(player).map_or_else(Default::default, Clone::clone)
     }
     /// Get all balances
-    pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, u64> { self.balances.clone() }
+    pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, Coins> { self.balances.clone() }
 
     /// Check if a player can afford to give up assets
     pub fn check_asset_removal(&self, player: &PlayerId, asset: &str, count: u64) -> Result<(), Error> {
         // If the player doesn't have an account, they definitely cannot withdraw
         let Some(tgt) = self.assets.get(player)
-        else { return Err(Error::Overdrawn { asset: Some(asset.to_string()), amount_overdrawn: count }); };
+        else { return Err(Error::OverdrawnAsset { asset: asset.to_string(), amount_overdrawn: count }); };
 
         // If they aren't listed for an asset, they definitely cannot withdraw
         let Some(tgt) = tgt.get(asset)
-        else { return Err(Error::Overdrawn { asset: Some(asset.to_string()), amount_overdrawn: count }); };
+        else { return Err(Error::OverdrawnAsset { asset: asset.to_string(), amount_overdrawn: count }); };
 
         // If they don't have enough, they cannot withdraw
         if *tgt < count  {
-            return Err(Error::Overdrawn { asset: Some(asset.to_string()), amount_overdrawn: count - *tgt });
+            return Err(Error::OverdrawnAsset { asset: asset.to_string(), amount_overdrawn: count - *tgt });
         }
         Ok(())
     }
@@ -42,15 +44,15 @@ impl BalanceTracker {
     pub fn commit_asset_removal(&mut self, player: &PlayerId, asset: &AssetId, count: u64) -> Result<(), Error> {
         // If the player doesn't have an account, they definitely cannot withdraw
         let Some(assets) = self.assets.get_mut(player)
-        else { return Err(Error::Overdrawn { asset: Some(asset.clone()), amount_overdrawn: count }); };
+        else { return Err(Error::OverdrawnAsset { asset: asset.clone(), amount_overdrawn: count }); };
 
         // If they aren't listed for an asset, they definitely cannot withdraw
         let Some(tgt) = assets.get_mut(asset)
-        else { return Err(Error::Overdrawn { asset: Some(asset.clone()), amount_overdrawn: count }); };
+        else { return Err(Error::OverdrawnAsset { asset: asset.clone(), amount_overdrawn: count }); };
 
         // If they don't have enough, they cannot withdraw
         if *tgt < count  {
-            return Err(Error::Overdrawn { asset: Some(asset.to_string()), amount_overdrawn: count - *tgt });
+            return Err(Error::OverdrawnAsset { asset: asset.to_string(), amount_overdrawn: count - *tgt });
         }
 
         // Take away their assets
@@ -62,41 +64,41 @@ impl BalanceTracker {
                 self.assets.remove(player);
             }
         }
-        self.current_audit.sub_asset(asset.clone(), count).expect("Asset removal failed audit");
+        self.current_audit.sub_asset(asset.clone(), count);
         Ok(())
     }
     /// Check if a player can afford to pay
-    pub fn check_coin_removal(&self, player: &PlayerId, count: u64) -> Result<(), Error> {
+    pub fn check_coin_removal(&self, player: &PlayerId, count: Coins) -> Result<(), Error> {
         // If the player doesn't have an account, they definitely cannot withdraw
         let Some(tgt) = self.balances.get(player)
-        else { return Err(Error::Overdrawn { asset: None, amount_overdrawn: count }); };
+        else { return Err(Error::OverdrawnCoins { amount_overdrawn: count }); };
 
         // If they don't have enough, they cannot withdraw
         if *tgt < count {
-            return Err(Error::Overdrawn { asset: None, amount_overdrawn: count - *tgt });
+            return Err(Error::OverdrawnCoins { amount_overdrawn: count.checked_sub(*tgt).expect("Overdrawn underflow") });
         }
         Ok(())
     }
     /// Decreases a player's coin count, but only if they can afford it
-    pub fn commit_coin_removal(&mut self, player: &PlayerId, count: u64) -> Result<(), Error> {
+    pub fn commit_coin_removal(&mut self, player: &PlayerId, count: Coins) -> Result<(), Error> {
         // If the player doesn't have an account, they definitely cannot withdraw
         let Some(tgt) = self.balances.get_mut(player)
-        else { return Err(Error::Overdrawn { asset: None, amount_overdrawn: count }); };
+        else { return Err(Error::OverdrawnCoins { amount_overdrawn: count }); };
 
         // If they don't have enough, they cannot withdraw
         if *tgt < count {
-            return Err(Error::Overdrawn { asset: None, amount_overdrawn: count - *tgt });
+            return Err(Error::OverdrawnCoins { amount_overdrawn: count.checked_sub(*tgt).expect("Overdrawn underflow") });
         }
 
         // Take away their coins
-        *tgt -= count;
+        tgt.checked_sub_assign(count).expect("Coin removal underflow");
 
         // If it's zero, clean up
-        if *tgt == 0 {
+        if tgt.is_zero() {
             self.balances.remove(player);
         }
 
-        self.current_audit.sub_coins(count).expect("Balance removal failed audit");
+        self.current_audit.sub_coins(count);
         Ok(())
     }
     /// Increases a player's asset count
@@ -105,16 +107,16 @@ impl BalanceTracker {
         self.current_audit.add_asset(asset.clone(), count);
     }
     /// Increases a player's coin count
-    pub fn commit_coin_add(&mut self, player: &PlayerId, count: u64) {
-        *self.balances.entry(player.clone()).or_default() += count;
-        self.current_audit.coins += count;
+    pub fn commit_coin_add(&mut self, player: &PlayerId, count: Coins) {
+        self.balances.entry(player.clone()).or_default().checked_add_assign(count).expect("Player balance overflow");
+        self.current_audit.add_coins(count);
     }
 }
 impl Auditable for BalanceTracker {
     fn soft_audit(&self) -> Audit { self.current_audit.clone() }
 
     fn hard_audit(&self) -> Audit {
-        if self.current_audit.coins != self.balances.values().sum::<u64>() {
+        if self.current_audit.coins != self.balances.values().fold(Coins::default(), |acc, i| acc.checked_add(*i).expect("Audit balance overflow")) {
             panic!("Coins inconsistent in balance");
         }
         let mut recalced_assets: std::collections::HashMap<AssetId, u64> = std::collections::HashMap::new();

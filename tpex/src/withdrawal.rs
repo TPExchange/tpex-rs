@@ -1,3 +1,5 @@
+use crate::Coins;
+
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
 #[derive(Debug, Clone)]
@@ -6,7 +8,7 @@ pub struct PendingWithdrawl {
     pub player: PlayerId,
     pub assets: std::collections::HashMap<AssetId, u64>,
     pub expedited: bool,
-    pub total_fee: u64
+    pub total_fee: Coins
 }
 
 #[derive(Debug, Default, Clone)]
@@ -35,11 +37,11 @@ impl WithdrawalTracker {
     pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawl> {
         self.pending_expedited_withdrawals.values().next().or_else(|| self.pending_normal_withdrawals.values().next()).cloned()
     }
-    pub fn track_withdrawal(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>, total_fee: u64) {
+    pub fn track_withdrawal(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>, total_fee: Coins) {
         self.pending_normal_withdrawals.insert(id, PendingWithdrawl{ id, player, assets: assets.clone(), expedited: false, total_fee });
         self.current_audit += Audit{coins: total_fee, assets}
     }
-    pub fn expedite(&mut self, id: u64, fee: u64) -> Result<(), Error> {
+    pub fn expedite(&mut self, id: u64, fee: Coins) -> Result<(), Error> {
         // Try to find this withdrawal
         let std::collections::btree_map::Entry::Occupied(entry) = self.pending_normal_withdrawals.entry(id)
         else { return Err(Error::InvalidId { id }); };
@@ -47,8 +49,8 @@ impl WithdrawalTracker {
         let mut entry = entry.remove();
         // Give them the expedited flag, and track the money
         entry.expedited = true;
-        entry.total_fee += fee;
-        self.current_audit.coins += fee;
+        entry.total_fee.checked_add_assign(fee).expect("Withdraw fee overflow");
+        self.current_audit.add_coins(fee);
         // Insert them into the expedited list
         self.pending_expedited_withdrawals.insert(id, entry);
         Ok(())
@@ -58,10 +60,10 @@ impl WithdrawalTracker {
         let Some(res) = self.pending_normal_withdrawals.remove(&id).or_else(|| self.pending_expedited_withdrawals.remove(&id))
         else { return Err(Error::InvalidId{id}); };
         // We are no longer responsible for the fee
-        self.current_audit.sub_coins(res.total_fee).expect("Unaudited fee in withdrawl");
+        self.current_audit.sub_coins(res.total_fee);
         // We no longer have the items
         for (asset, count) in res.assets.iter() {
-            self.current_audit.sub_asset(asset.clone(), *count).expect("Oversubtracted asset in withdrawl completion");
+            self.current_audit.sub_asset(asset.clone(), *count);
         }
         Ok(res)
     }
@@ -75,7 +77,7 @@ impl Auditable for WithdrawalTracker {
             for (asset, count) in &withdrawal.assets {
                 new_audit.add_asset(asset.clone(), *count);
             }
-            new_audit.coins += withdrawal.total_fee;
+            new_audit.add_coins(withdrawal.total_fee);
         }
         if new_audit != self.current_audit {
             panic!("Recalculated withdrawal audit differs from soft audit");

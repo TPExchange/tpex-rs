@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::{Add, AddAssign, Mul}};
+use std::{collections::HashSet, ops::{Add, AddAssign}};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
@@ -11,19 +11,20 @@ mod balance;
 mod investment;
 mod order;
 mod withdrawal;
+mod coins;
 #[cfg(test)]
 mod tests;
 
 pub use order::OrderType;
+pub use coins::Coins;
 
-pub const COINS_PER_DIAMOND: u64 = 1000;
 pub const DIAMOND_NAME: &str = "diamond";
 const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
-    withdraw_flat: 1000,
-    withdraw_per_stack: 20,
-    expedited: 5000,
+    withdraw_flat: Coins::from_millicoins(1000),
+    withdraw_per_stack: Coins::from_millicoins(20),
+    expedited: Coins::from_millicoins(5000),
     investment_share: 0.5,
-    instant_smelt_per_stack: 100
+    instant_smelt_per_stack: Coins::from_millicoins(100)
 };
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Default, Debug, Clone, Hash)]
@@ -36,14 +37,14 @@ impl PlayerId {
     pub fn the_bank() -> PlayerId { PlayerId("bank".to_owned()) }
 }
 impl<'de> Deserialize<'de> for PlayerId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de> {
         String::deserialize(deserializer).map(PlayerId)
     }
 }
 impl Serialize for PlayerId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer {
         String::serialize(&self.0, serializer)
@@ -127,7 +128,7 @@ pub enum Action {
         player: PlayerId,
         asset: AssetId,
         count: u64,
-        coins_per: u64,
+        coins_per: Coins,
     },
     /// Player offers to sell assets at a price, and locks away assets until cancelled
     ///
@@ -136,7 +137,7 @@ pub enum Action {
         player: PlayerId,
         asset: AssetId,
         count: u64,
-        coins_per: u64,
+        coins_per: Coins,
     },
     /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
@@ -152,11 +153,11 @@ pub enum Action {
     },
     /// Changes the fees
     UpdateBankPrices {
-        withdraw_flat: u64,
-        withdraw_per_stack: u64,
-        expedited: u64,
+        withdraw_flat: Coins,
+        withdraw_per_stack: Coins,
+        expedited: Coins,
         investment_share: f64,
-        instant_smelt_per_stack: u64,
+        instant_smelt_per_stack: Coins,
         banker: PlayerId,
     },
     // TODO: Not sure about these yet, let's see what demand we get
@@ -180,7 +181,7 @@ pub enum Action {
     TransferCoins {
         payer: PlayerId,
         payee: PlayerId,
-        count: u64
+        count: Coins
     },
     /// A transfer of items from one player to another, no strings attached
     TransferAsset {
@@ -243,7 +244,7 @@ impl Action {
                 Some(audit)
             },
             Action::Undeposit { asset, count, .. } => {
-                audit.sub_asset(asset.clone(), *count).expect("Unable to adjust down deposit");
+                audit.sub_asset(asset.clone(), *count);
                 Some(audit.clone())
             }
             Action::WithdrawlCompleted{..} => {
@@ -253,13 +254,13 @@ impl Action {
                 None
             },
             Action::BuyCoins { n_diamonds,.. } => {
-                audit.coins += *n_diamonds * COINS_PER_DIAMOND;
-                audit.sub_asset(DIAMOND_NAME.to_owned(), *n_diamonds).expect("Unable to adjust down buy coins audit");
+                audit.add_coins(Coins::from_diamonds(*n_diamonds).expect("BuyCoins overflow in audit"));
+                audit.sub_asset(DIAMOND_NAME.to_owned(), *n_diamonds as u64);
                 Some(audit)
             },
             Action::SellCoins { n_diamonds, .. } => {
-                audit.sub_coins(*n_diamonds * COINS_PER_DIAMOND).expect("Unable to adjust sell buy coins audit");
-                audit.add_asset(DIAMOND_NAME.to_owned(), *n_diamonds);
+                audit.sub_coins(Coins::from_diamonds(*n_diamonds).expect("SellCoins overflow in audit"));
+                audit.add_asset(DIAMOND_NAME.to_owned(), *n_diamonds as u64);
                 Some(audit)
             },
             _ => Some(audit)
@@ -269,31 +270,33 @@ impl Action {
 
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Audit {
-    pub coins: u64,
+    pub coins: Coins,
     pub assets: std::collections::HashMap<AssetId, u64>
 }
 impl Audit {
     pub fn add_asset(&mut self, asset: AssetId, count: u64) {
         if count > 0 {
-            *self.assets.entry(asset).or_default() += count;
+            let entry = self.assets.entry(asset).or_default();
+            *entry = entry.checked_add(count).expect("Failed to add asset to audit")
         }
     }
-    #[must_use]
-    pub fn sub_asset(&mut self, asset: AssetId, count: u64) -> Option<()> {
+    pub fn sub_asset(&mut self, asset: AssetId, count: u64) {
         if count == 0 {
-            return Some(())
+            return;
         }
         let std::collections::hash_map::Entry::Occupied(mut entry) = self.assets.entry(asset)
-        else { return None; };
+        else { panic!("Tried to remove empty asset from audit") };
         match entry.get().checked_sub(count) {
-            Some(0) => {entry.remove(); Some(()) },
-            None => None,
-            Some(res) => { *entry.get_mut() = res; Some(()) }
+            Some(0) => {entry.remove();  },
+            None => panic!("Failed to remove asset from audit"),
+            Some(res) => { *entry.get_mut() = res; }
         }
     }
-    #[must_use]
-    pub fn sub_coins(&mut self, count: u64) -> Option<()> {
-        self.coins.checked_sub(count).map(|res| self.coins = res)
+    pub fn add_coins(&mut self, count: Coins) {
+        self.coins.checked_add_assign(count).expect("Failed to add coins to audit")
+    }
+    pub fn sub_coins(&mut self, count: Coins) {
+        self.coins.checked_sub_assign(count).expect("Failed to remove coins from audit")
     }
 }
 impl Add for Audit {
@@ -307,7 +310,7 @@ impl Add for Audit {
 }
 impl AddAssign for Audit {
     fn add_assign(&mut self, rhs: Self) {
-        self.coins += rhs.coins;
+        self.coins.checked_add_assign(rhs.coins).expect("Audit merge failed: coin overflow");
         rhs.assets.into_iter().for_each(|(asset, count)| self.add_asset(asset, count));
     }
 }
@@ -333,12 +336,14 @@ pub struct WrappedAction {
 pub struct AssetInfo {
     stack_size: u64
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    Overdrawn{
-        /// If None, then it's coins overdrawn
-        asset: Option<AssetId>,
+    OverdrawnAsset {
+        asset: AssetId,
         amount_overdrawn: u64
+    },
+    OverdrawnCoins {
+        amount_overdrawn: Coins
     },
     UnauthorisedWithdrawl{asset: AssetId, amount_overdrawn: Option<u64>},
     /// Some 1337 hacker tried an overflow attack >:(
@@ -349,17 +354,19 @@ pub enum Error {
     InvestmentBusy{asset: AssetId, amount_over: u64},
     NotConvertable{from: AssetId, to: AssetId},
     AlreadyDone,
-    IsNotABanker{player: PlayerId}
+    IsNotABanker{player: PlayerId},
+    CoinStringMangled,
+    CoinStringTooPrecise
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Overdrawn { asset, amount_overdrawn } => {
-                match asset {
-                    Some(asset) => write!(f, "Player needs {amount_overdrawn} more {asset} to perform this action."),
-                    None => write!(f, "Player needs {amount_overdrawn} more coins to perform this action.")
-                }
-            }
+            Error::OverdrawnAsset { asset, amount_overdrawn } => {
+                write!(f, "Player needs {amount_overdrawn} more {asset} to perform this action.")
+            },
+            Error::OverdrawnCoins { amount_overdrawn } => {
+                write!(f, "Player needs {amount_overdrawn} more to perform this action.")
+            },
             Error::UnauthorisedWithdrawl { asset, amount_overdrawn } => {
                 match amount_overdrawn {
                     Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}."),
@@ -390,19 +397,27 @@ impl std::fmt::Display for Error {
             },
             Error::IsNotABanker { player } => {
                 write!(f, "The requested action would require {player} to be a banker, but they are not.")
-            }
+            },
+            Error::CoinStringMangled => {
+                write!(f, "The system could not understand the given coin amount.")
+            },
+            Error::CoinStringTooPrecise => {
+            write!(f, "Too much precision was given for the coins: the system can only handle 3 decimal places.")
+            },
         }
 
     }
 }
 impl std::error::Error for Error {}
+type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug, Serialize, Clone)]
 struct UpdateBankPrices {
-    withdraw_flat: u64,
-    withdraw_per_stack: u64,
-    expedited: u64,
+    withdraw_flat: Coins,
+    withdraw_per_stack: Coins,
+    expedited: Coins,
     investment_share: f64,
-    instant_smelt_per_stack: u64
+    instant_smelt_per_stack: Coins
 }
 
 #[derive(Debug, Clone)]
@@ -415,7 +430,7 @@ pub struct State {
     authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
     investables: std::collections::HashSet<AssetId>,
 
-    earnings: std::collections::HashMap<PlayerId, u64>,
+    earnings: std::collections::HashMap<PlayerId, Coins>,
     bankers: std::collections::HashSet<PlayerId>,
 
     balance: balance::BalanceTracker,
@@ -453,22 +468,25 @@ impl State {
     /// Get the next line
     pub fn get_next_id(&self) -> u64 { self.next_id }
     /// Get a player's balance
-    pub fn get_bal(&self, player: &PlayerId) -> u64 { self.balance.get_bal(player) }
+    pub fn get_bal(&self, player: &PlayerId) -> Coins { self.balance.get_bal(player) }
     /// Get all balances
-    pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, u64> { self.balance.get_bals() }
+    pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, Coins> { self.balance.get_bals() }
     /// Get a player's assets
     pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> { self.balance.get_assets(player) }
     /// Calculate the withdrawal fees
-    pub fn calc_withdrawal_fee(&self, assets: &std::collections::HashMap<AssetId, u64>) -> Result<u64, Error> {
+    pub fn calc_withdrawal_fee(&self, assets: &std::collections::HashMap<AssetId, u64>) -> Result<Coins> {
         let mut total_fee = self.fees.withdraw_flat;
         for (asset, count) in assets {
-            total_fee += count.div_ceil(self.asset_info.get(asset).ok_or(Error::UnknownAsset{asset:asset.clone()})?.stack_size)
-                              .checked_mul(self.fees.withdraw_per_stack).ok_or(Error::Overflow)?;
+            total_fee.checked_add_assign(
+                self.fees.withdraw_per_stack.checked_mul(
+                    count.div_ceil(self.asset_info.get(asset).ok_or(Error::UnknownAsset{asset:asset.clone()})?.stack_size)
+                )?
+            )?
         }
         Ok(total_fee)
     }
     /// Get the expedite fee
-    pub fn expedite_fee(&self) -> u64 { self.fees.expedited }
+    pub fn expedite_fee(&self) -> Coins { self.fees.expedited }
     /// List all withdrawals
     pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> { self.withdrawal.get_withdrawals() }
     /// Get the withdrawal the bankers should examine next
@@ -476,9 +494,9 @@ impl State {
     /// List all orders
     pub fn get_orders(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.order.get_all() }
     /// Get a specific order
-    pub fn get_order(&self, id: u64) -> Result<PendingOrder, Error> { self.order.get_order(id) }
+    pub fn get_order(&self, id: u64) -> Result<PendingOrder> { self.order.get_order(id) }
     /// Prices for an asset, returns (price, amount) in (buy, sell)
-    pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<u64, u64>, std::collections::BTreeMap<u64, u64>) { self.order.get_prices(asset) }
+    pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<Coins, u64>, std::collections::BTreeMap<Coins, u64>) { self.order.get_prices(asset) }
     /// Returns true if the given item is currently restricted
     pub fn is_restricted(&self, asset: &AssetId) -> bool { self.restricted_assets.contains(asset) }
     /// Lists all restricted items
@@ -488,11 +506,11 @@ impl State {
     /// Returns true if the given player is an banker
     pub fn is_banker(&self, player: &PlayerId) -> bool { self.bankers.contains(player) }
     /// Gets info about a certain asset
-    pub fn asset_info(&self, asset: &AssetId) -> Result<AssetInfo, Error> {
+    pub fn asset_info(&self, asset: &AssetId) -> Result<AssetInfo> {
         self.asset_info.get(asset).cloned().ok_or_else(|| Error::UnknownAsset { asset: asset.clone() })
     }
     /// Get the required permissions for a given action
-    pub fn perms(&self, action: &Action) -> Result<ActionPermissions, Error> {
+    pub fn perms(&self, action: &Action) -> Result<ActionPermissions> {
         match action {
             Action::AuthoriseRestricted { banker, .. } |
             Action::Deleted { banker, .. } |
@@ -526,27 +544,10 @@ impl State {
 
         }
     }
-    /// Distribute the profits among the investors
-    fn distribute_profit(&mut self, asset: &AssetId, amount: u64) {
-        let mut investors = self.investment.get_investors(asset);
-        // Let's be fair and not give ourselves all the money
-        investors.remove(&PlayerId::the_bank());
-        let share = (self.fees.investment_share.mul(amount as f64) / (investors.values().sum::<u64>() as f64)).floor() as u64;
-        let mut total_distributed = 0;
-        for (investor, shares) in investors {
-            let investor_profit = share * shares;
-            total_distributed += investor_profit;
-            self.balance.commit_coin_add(&investor, investor_profit);
-        }
-        if total_distributed > amount {
-            panic!("Profit distribution imprecision was too bad");
-        }
-        self.balance.commit_coin_add(&PlayerId::the_bank(), amount - total_distributed);
-    }
     // Atomic (but not parallelisable!).
     // This means the function will change significant things (i.e. more than just creating empty lists) IF AND ONLY IF it fully succeeds.
     // As such, we don't have to worry about giving it bad actions
-    fn apply_inner(&mut self, id: u64, action: Action) -> Result<(), Error> {
+    fn apply_inner(&mut self, id: u64, action: Action) -> Result<()> {
         // Blanket check perms
         //
         // TODO: optimise
@@ -628,7 +629,7 @@ impl State {
             },
             Action::BuyOrder { player, asset, count, coins_per } => {
                 // Check and take their money first
-                self.balance.commit_coin_removal(&player, count.checked_mul(coins_per).ok_or(Error::Overflow)?)?;
+                self.balance.commit_coin_removal(&player, coins_per.checked_mul(count)?)?;
                 // Do the matching and listing
                 let res = self.order.handle_buy(id, &player, &asset, count, coins_per);
                 // Transfer the money
@@ -648,7 +649,7 @@ impl State {
                 // Try to take out the pending transaction
                 let res = self.withdrawal.complete(target)?;
                 // Mark who delivered
-                *self.earnings.entry(banker).or_default() += res.total_fee;
+                self.earnings.entry(banker).or_default().checked_add_assign(res.total_fee).expect("Withdrawl earnings overflow");
                 // Add the profit
                 self.balance.commit_coin_add(&PlayerId::the_bank(), res.total_fee);
                 Ok(())
@@ -666,16 +667,16 @@ impl State {
             },
             Action::BuyCoins { player, n_diamonds } => {
                 // Check and take diamonds from payer...
-                self.balance.commit_asset_removal(&player,&DIAMOND_NAME.to_owned(), n_diamonds)?;
+                self.balance.commit_asset_removal(&player,&DIAMOND_NAME.to_owned(), n_diamonds as u64)?;
                 // ... and give them the coins
-                self.balance.commit_coin_add(&player, n_diamonds * COINS_PER_DIAMOND);
+                self.balance.commit_coin_add(&player, Coins::from_diamonds(n_diamonds).expect("BuyCoins overflow")); // This panic stops inconsistencies
                 Ok(())
             },
             Action::SellCoins { player, n_diamonds } => {
                 // Check and take coins from payer...
-                self.balance.commit_coin_removal(&player, n_diamonds.checked_mul(COINS_PER_DIAMOND).ok_or(Error::Overflow)?)?;
+                self.balance.commit_coin_removal(&player, Coins::from_diamonds(n_diamonds)?)?;
                 // ... and give them the diamonds
-                self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds);
+                self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds as u64);
                 Ok(())
             },
             Action::UpdateRestricted { restricted_assets , ..} => {
@@ -795,7 +796,7 @@ impl State {
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
-    pub async fn replay(&mut self, trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin)) -> Result<(), Error> {
+    pub async fn replay(&mut self, trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin)) -> Result<()> {
         let trade_file_reader = tokio::io::BufReader::new(trade_file);
         let mut trade_file_lines = trade_file_reader.lines();
         let mut last_audit = self.hard_audit();
@@ -821,7 +822,7 @@ impl State {
         Ok(())
     }
     /// Atomically try to apply an action, and if successful, write to given stream
-    pub async fn apply(&mut self, action: Action, out: &mut (impl tokio::io::AsyncWrite + std::marker::Unpin)) -> Result<u64, Error> {
+    pub async fn apply(&mut self, action: Action, out: &mut (impl tokio::io::AsyncWrite + std::marker::Unpin)) -> Result<u64> {
         let id = self.next_id;
         let wrapped_action = WrappedAction {
             id,
@@ -857,7 +858,7 @@ impl Auditable for State {
 
 impl Serialize for State {
     // Returns an object that can be used to check we haven't gone off the rails
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> where S: serde::Serializer {
         let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("next_id", &self.next_id)?;
         map.serialize_entry("balance", &self.balance)?;

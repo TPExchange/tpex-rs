@@ -4,7 +4,7 @@ mod banker;
 
 use std::str::FromStr;
 
-use tpex::{AssetId, PlayerId, Auditable};
+use tpex::{AssetId, Auditable, Coins, PlayerId};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
 use itertools::Itertools;
 
@@ -131,7 +131,7 @@ async fn sellcoins(
     ctx.defer_ephemeral().await?;
     let player = player_id(ctx.author());
     ctx.data().apply(tpex::Action::SellCoins { player, n_diamonds }).await?;
-    ctx.reply(format!("You have succesfully bought {} diamonds for {} coins", n_diamonds, n_diamonds * tpex::COINS_PER_DIAMOND)).await?;
+    ctx.reply(format!("You have succesfully bought {} diamonds for {} coins", n_diamonds, Coins::from_diamonds(n_diamonds)?)).await?;
     Ok(())
 }
 /// Get the machine-readable list of all transactions

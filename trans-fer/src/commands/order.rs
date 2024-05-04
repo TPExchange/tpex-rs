@@ -2,7 +2,7 @@ use itertools::Itertools;
 use poise::{serenity_prelude::{self as serenity, CreateEmbed, CreateInteractionResponseMessage}, CreateReply};
 
 use crate::commands::player_id;
-use tpex::Action;
+use tpex::{Action, Coins};
 
 use super::{Context, Error};
 // Commands that handle orders
@@ -61,14 +61,15 @@ async fn buy(ctx: Context<'_>,
     #[description = "The amount you want to order"]
     amount: u64,
     #[description = "The price you want to pay per item"]
-    coins_per: u64
+    coins_per: String
 ) -> Result<(), Error> {
     ctx.defer_ephemeral().await?;
+    let coins_per: Coins = coins_per.parse()?;
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
     let die_time = (ctx.created_at().naive_utc() + LIFETIME).and_utc();
     let die_unix = die_time.timestamp();
 
-    let total = coins_per * amount;
+    let total = coins_per.checked_mul(amount)?;
     let ctx_id = ctx.id();
     let ctx_suffix = format!("_{ctx_id}");
     let buy_id = format!("buy{ctx_suffix}");
@@ -152,14 +153,15 @@ async fn sell(ctx: Context<'_>,
     #[description = "The amount you want to order"]
     amount: u64,
     #[description = "The Coin(s) you want to get per item"]
-    coins_per: u64
+    coins_per: String
 ) -> Result<(), Error> {
     ctx.defer_ephemeral().await?;
+    let coins_per: Coins = coins_per.parse()?;
     const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5 * 60); //5 * 60
     let die_time = (ctx.created_at().naive_utc() + LIFETIME).and_utc();
     let die_unix = die_time.timestamp();
 
-    let total = coins_per * amount;
+    let total = coins_per.checked_mul(amount)?;
     let ctx_id = ctx.id();
     let ctx_suffix = format!("_{ctx_id}");
 
