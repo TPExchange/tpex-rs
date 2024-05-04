@@ -200,7 +200,7 @@ pub async fn complete(
 ) -> Result<(), Error> {
     ctx.defer_ephemeral().await?;
     let banker = player_id(ctx.author());
-    ctx.data().apply(Action::WithdrawlCompleted { target: withdrawal_id, banker }).await?;
+    ctx.data().apply(Action::WithdrawalCompleted { target: withdrawal_id, banker }).await?;
     ctx.reply("Withdrawal completion succeeded.").await?;
     Ok(())
 }

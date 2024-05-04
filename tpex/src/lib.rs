@@ -5,7 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 // We use a base coins, which represent 1/1000 of a diamond
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 
-use self::{order::PendingOrder, withdrawal::PendingWithdrawl};
+use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
 mod balance;
 mod investment;
@@ -102,12 +102,12 @@ pub enum Action {
         target: u64
     },
     /// Player asked to withdraw assets
-    WithdrawlRequested {
+    WithdrawalRequested {
         player: PlayerId,
         assets: std::collections::HashMap<AssetId,u64>
     },
     /// A banker has agreed to take out assets imminently
-    WithdrawlCompleted {
+    WithdrawalCompleted {
         target: u64,
         banker: PlayerId,
     },
@@ -247,7 +247,7 @@ impl Action {
                 audit.sub_asset(asset.clone(), *count);
                 Some(audit.clone())
             }
-            Action::WithdrawlCompleted{..} => {
+            Action::WithdrawalCompleted{..} => {
                 // We don't know what the withdrawal is just from the id
                 //
                 // TODO: find a way to track this nicely
@@ -345,7 +345,7 @@ pub enum Error {
     OverdrawnCoins {
         amount_overdrawn: Coins
     },
-    UnauthorisedWithdrawl{asset: AssetId, amount_overdrawn: Option<u64>},
+    UnauthorisedWithdrawal{asset: AssetId, amount_overdrawn: Option<u64>},
     /// Some 1337 hacker tried an overflow attack >:(
     Overflow,
     InvalidId{id: u64},
@@ -367,7 +367,7 @@ impl std::fmt::Display for Error {
             Error::OverdrawnCoins { amount_overdrawn } => {
                 write!(f, "Player needs {amount_overdrawn} more to perform this action.")
             },
-            Error::UnauthorisedWithdrawl { asset, amount_overdrawn } => {
+            Error::UnauthorisedWithdrawal { asset, amount_overdrawn } => {
                 match amount_overdrawn {
                     Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}."),
                     None => write!(f, "Player needs authorisation to withdraw {asset}.")
@@ -488,9 +488,9 @@ impl State {
     /// Get the expedite fee
     pub fn expedite_fee(&self) -> Coins { self.fees.expedited }
     /// List all withdrawals
-    pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawl> { self.withdrawal.get_withdrawals() }
+    pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawal> { self.withdrawal.get_withdrawals() }
     /// Get the withdrawal the bankers should examine next
-    pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawl> { self.withdrawal.get_next_withdrawal() }
+    pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawal> { self.withdrawal.get_next_withdrawal() }
     /// List all orders
     pub fn get_orders(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.order.get_all() }
     /// Get a specific order
@@ -520,7 +520,7 @@ impl State {
             // Action::UpdateConvertables { banker, .. } |
             Action::UpdateInvestables { banker, .. } |
             Action::UpdateRestricted { banker, .. } |
-            Action::WithdrawlCompleted { banker, .. } |
+            Action::WithdrawalCompleted { banker, .. } |
             Action::Undeposit { banker, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
 
@@ -533,7 +533,7 @@ impl State {
             Action::TransferAsset { payer: player, .. } |
             Action::TransferCoins { payer: player, .. } |
             Action::Uninvest { player, .. } |
-            Action::WithdrawlRequested { player, .. }
+            Action::WithdrawalRequested { player, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Normal, player: player.clone()}),
 
             Action::Expedited { target } =>
@@ -570,7 +570,7 @@ impl State {
             Action::Undeposit { player, asset, count, .. } => {
                 self.balance.commit_asset_removal(&player, &asset, count)
             },
-            Action::WithdrawlRequested { player, assets} => {
+            Action::WithdrawalRequested { player, assets} => {
                 let total_fee = self.calc_withdrawal_fee(&assets)?;
 
                 let mut tracked_assets: std::collections::HashMap<AssetId, u64> = Default::default();
@@ -586,10 +586,10 @@ impl State {
                         // If it is restricted, we have to check before we take their assets
                         // Check if they are authorised to withdraw any amount of these items
                         let Some(auth_amount) = self.authorisations.get(&player).and_then(|x| x.get(&asset))
-                        else { return Err(Error::UnauthorisedWithdrawl{ asset: asset.clone(), amount_overdrawn: None}); };
+                        else { return Err(Error::UnauthorisedWithdrawal{ asset: asset.clone(), amount_overdrawn: None}); };
                         // Check if they are authorised to withdraw at least this many items
                         if *auth_amount < count {
-                            return Err(Error::UnauthorisedWithdrawl{ asset: asset.clone(), amount_overdrawn: Some(count - *auth_amount)});
+                            return Err(Error::UnauthorisedWithdrawal{ asset: asset.clone(), amount_overdrawn: Some(count - *auth_amount)});
                         }
                     }
                     tracked_assets.insert(asset, count);
@@ -645,11 +645,11 @@ impl State {
 
                 Ok(())
             },
-            Action::WithdrawlCompleted { target, banker } => {
+            Action::WithdrawalCompleted { target, banker } => {
                 // Try to take out the pending transaction
                 let res = self.withdrawal.complete(target)?;
                 // Mark who delivered
-                self.earnings.entry(banker).or_default().checked_add_assign(res.total_fee).expect("Withdrawl earnings overflow");
+                self.earnings.entry(banker).or_default().checked_add_assign(res.total_fee).expect("Withdrawal earnings overflow");
                 // Add the profit
                 self.balance.commit_coin_add(&PlayerId::the_bank(), res.total_fee);
                 Ok(())
