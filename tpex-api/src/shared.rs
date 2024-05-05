@@ -1,13 +1,14 @@
 use std::{fmt::Display, str::FromStr};
 
+use num_traits::FromPrimitive;
+use serde::{de::Visitor, Deserialize, Serialize};
 use tpex::PlayerId;
 use base64::prelude::*;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[repr(u8)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone)]
 #[derive(num_derive::FromPrimitive)]
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum TokenLevel {
+pub enum TokenLevel  {
     /// The client can only get general pricing data
     ReadOnly = 0,
     /// The client can act on behalf of a user, but not for banker commands
@@ -15,10 +16,33 @@ pub enum TokenLevel {
     /// The client can act on behalf of any user, and perform admin commands
     ProxyAll = 2,
 }
+impl Serialize for TokenLevel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer {
+        serializer.serialize_u8(*self as u8)
+    }
+}
+impl<'de> Deserialize<'de> for TokenLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de> {
+        struct Inner;
+        impl<'de> Visitor<'de> for Inner {
+            type Value = TokenLevel;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "an integer TokenLevel")
+            }
+
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            where E: serde::de::Error, {
+                TokenLevel::from_u8(v).ok_or(E::invalid_value(serde::de::Unexpected::Unsigned(v as u64), &Self))
+            }
+        }
+        deserializer.deserialize_u8(Inner)
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
 pub struct Token(pub [u8;16]);
 impl Token {
     #[cfg(feature = "bin")]
@@ -49,6 +73,34 @@ impl Display for Token {
         write!(f, "{}", BASE64_STANDARD_NO_PAD.encode(self.0))
     }
 }
+impl Serialize for Token {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+impl<'de> Deserialize<'de> for Token {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de> {
+        struct Inner;
+        impl<'de> Visitor<'de> for Inner {
+            type Value = Token;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "a base64-encoded token")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error, {
+                v.parse().map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_str(Inner)
+    }
+}
+
 #[derive(PartialEq, Eq, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenInfo {
