@@ -58,7 +58,7 @@ impl axum::response::IntoResponse for Error {
         let (code,err) = match self {
             Self::TPEx(err) => (409, ErrorInfo{error:err.to_string()}),
             Self::UncontrolledUser => (403, ErrorInfo{error:"This action would act on behalf of a different user.".to_owned()}),
-            Self::TokenTooLowLevel => (403, ErrorInfo{error:"This actions requires a higher permission level".to_owned()}),
+            Self::TokenTooLowLevel => (403, ErrorInfo{error:"This action requires a higher permission level".to_owned()}),
             Self::TokenInvalid => (409, ErrorInfo{error:"The given token does not exist".to_owned()})
         };
 
@@ -77,9 +77,8 @@ impl axum::response::IntoResponse for Error {
 async fn state_patch(
     axum::extract::State(state): axum::extract::State<State>,
     token: TokenInfo,
-    axum::extract::Json(action): axum::extract::Json<tpex::Action>)
-    -> Result<axum::response::Json<u64>, Error>
-{
+    axum::extract::Json(action): axum::extract::Json<tpex::Action>
+) -> Result<axum::response::Json<u64>, Error> {
     match token.level {
         TokenLevel::ReadOnly => return Err(Error::TokenTooLowLevel),
         TokenLevel::ProxyOne => {
@@ -102,9 +101,8 @@ async fn state_get(
     axum::extract::State(state): axum::extract::State<State>,
     // must extract token to auth
     _token: TokenInfo,
-    axum_extra::extract::OptionalQuery(args): axum_extra::extract::OptionalQuery<StateGetArgs>)
-    -> axum::response::Response
-{
+    axum_extra::extract::OptionalQuery(args): axum_extra::extract::OptionalQuery<StateGetArgs>
+) -> axum::response::Response {
     let from = args.unwrap_or_default().from.unwrap_or(0).try_into().unwrap_or(usize::MAX);
     let mut data = state.tpex.write().await.get_lines().await;
     if from > 1 {
@@ -131,18 +129,17 @@ async fn state_get(
 
 async fn token_get(
     axum::extract::State(_state): axum::extract::State<State>,
-    token: TokenInfo)
-    -> axum::Json<TokenInfo> {
+    token: TokenInfo
+) -> axum::Json<TokenInfo> {
     axum::Json(token)
 }
 
 async fn token_post(
     axum::extract::State(state): axum::extract::State<State>,
     token: TokenInfo,
-    axum::extract::Json(args): axum::extract::Json<TokenPostArgs>)
-    -> Result<axum::Json<Token>, Error>
-{
-    if args.level < token.level {
+    axum::extract::Json(args): axum::extract::Json<TokenPostArgs>
+) -> Result<axum::Json<Token>, Error> {
+    if args.level > token.level {
         return Err(Error::TokenTooLowLevel)
     }
     if args.user != token.user && token.level < TokenLevel::ProxyAll {
@@ -155,9 +152,8 @@ async fn token_post(
 async fn token_delete(
     axum::extract::State(state): axum::extract::State<State>,
     token: TokenInfo,
-    axum::extract::Json(args): axum::extract::Json<TokenDeleteArgs>)
-    -> Result<axum::Json<()>, Error>
-{
+    axum::extract::Json(args): axum::extract::Json<TokenDeleteArgs>
+) -> Result<axum::Json<()>, Error> {
     let target = args.token.unwrap_or(token.token);
     // We only need perms to delete other tokens
     if target != token.token && token.level < TokenLevel::ProxyAll {
