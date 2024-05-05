@@ -19,7 +19,7 @@ pub enum TokenLevel  {
 impl Serialize for TokenLevel {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
-        serializer.serialize_u8(*self as u8)
+        serializer.serialize_u64(*self as u64)
     }
 }
 impl<'de> Deserialize<'de> for TokenLevel {
@@ -33,12 +33,12 @@ impl<'de> Deserialize<'de> for TokenLevel {
                 write!(formatter, "an integer TokenLevel")
             }
 
-            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
             where E: serde::de::Error, {
-                TokenLevel::from_u8(v).ok_or(E::invalid_value(serde::de::Unexpected::Unsigned(v as u64), &Self))
+                TokenLevel::from_u64(v).ok_or(E::invalid_value(serde::de::Unexpected::Unsigned(v as u64), &Self))
             }
         }
-        deserializer.deserialize_u8(Inner)
+        deserializer.deserialize_u64(Inner)
     }
 }
 
