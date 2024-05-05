@@ -1,6 +1,6 @@
 mod shared;
 
-use shared::*;
+pub use shared::*;
 use tpex::{AssetId, AssetInfo, State};
 
 pub use shared::Token;
@@ -62,11 +62,11 @@ impl Remote {
 
         Ok(Self::check_response(self.client.patch(target).json(action).send().await?).await?.json().await?)
     }
-    pub async fn get_token(&self, args: &TokenPostArgs) -> Result<TokenInfo> {
+    pub async fn get_token(&self, token: &Token) -> Result<TokenInfo> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        Ok(Self::check_response(self.client.post(target).json(args).send().await?).await?.json().await?)
+        Ok(Self::check_response(self.client.post(target).json(token).send().await?).await?.json().await?)
     }
     pub async fn create_token(&self, args: &TokenPostArgs) -> Result<Token> {
         let mut target = self.endpoint.clone();
@@ -74,7 +74,7 @@ impl Remote {
 
         Ok(Self::check_response(self.client.post(target).json(args).send().await?).await?.json().await?)
     }
-    pub async fn delete_token(&self, args: &TokenPostArgs) -> Result<()> {
+    pub async fn delete_token(&self, args: &TokenDeleteArgs) -> Result<()> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 

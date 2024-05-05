@@ -1,6 +1,7 @@
 mod withdraw;
 mod order;
 mod banker;
+mod token;
 
 use tpex::{AssetId, Auditable, Coins, PlayerId};
 use poise::serenity_prelude::{self as serenity, CreateEmbed};
@@ -203,6 +204,7 @@ pub fn get_commands() -> Vec<poise::Command<std::sync::Arc<Data>, Error>> {
 
         withdraw::withdraw(),
         order::order(),
-        banker::banker()
+        banker::banker(),
+        token::token()
     ]
 }

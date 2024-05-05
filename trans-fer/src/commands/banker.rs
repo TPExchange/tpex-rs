@@ -11,7 +11,7 @@ use super::{player_id, Context, Error};
 #[poise::command(slash_command, ephemeral, subcommands("raw", "deposit", "complete", "current", "authorise", "undeposit"), check = check)]
 pub async fn banker(_ctx: Context<'_>) -> Result<(), Error> { panic!("Banker metacommand called."); }
 
-async fn check(ctx: Context<'_>) -> Result<bool, Error> {
+pub async fn check(ctx: Context<'_>) -> Result<bool, Error> {
     if ctx.data().sync().await.is_banker(&player_id(ctx.author())) {
         Ok(true)
     }
