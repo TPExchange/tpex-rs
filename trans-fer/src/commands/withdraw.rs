@@ -177,7 +177,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
             serenity::CreateEmbed::new()
             .field("Name", "", true)
             .field("Count", "", true)
-            .field("Fees", ctx.data().sync().await.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string() + "c", false)
+            .field("Fees", ctx.data().sync().await.calc_withdrawal_fee(&std::collections::HashMap::new())?.to_string(), false)
         )
         .components(components)
     ).await?;
@@ -228,15 +228,14 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                         warn_modal.interaction.create_response(serenity_ctx.http, serenity::CreateInteractionResponse::Acknowledge).await?;
                         return Ok(());
                     }
-
                     let Some(check_modal) = mci.quick_modal(&serenity_ctx,
                         serenity::CreateQuickModal::new("Are you sure?")
-                        .short_field(format!("Type \"{fee}\" (The fee you will pay):"))).await?
+                        .short_field(format!("Type \"{fee}\" (The fee you will pay in coins):"))).await?
                     else {
                         // ctx.say("Withdrawal canceled!").await?;
                         return Ok::<(), Error>(())
                     };
-                    if check_modal.inputs[0] != fee {
+                    if check_modal.inputs[0].to_ascii_lowercase() != fee.to_ascii_lowercase() {
                         // ctx.say("Incorrect amount entered. Withdrawal canceled!").await?;
                         return Ok(());
                     }

@@ -185,7 +185,7 @@ fn list_assets(state: &tpex::State, assets: &std::collections::HashMap<AssetId, 
         .field("Name", assets.keys().join("\n"), true)
         .field("Count", assets.values().join("\n"), true)
         .field("Restricted",  assets.keys().map(|x| state.is_restricted(x).to_string()).join("\n"), true)
-        .field("Fees", state.calc_withdrawal_fee(assets)?.to_string() + "c", false)
+        .field("Fees", state.calc_withdrawal_fee(assets)?.to_string(), false)
     )
 }
 
