@@ -30,6 +30,7 @@ async fn coin_fuzz() {
         ("100c", Coins::from_millicoins(100_000), "100c"),
         ("100", Coins::from_millicoins(100_000), "100c"),
         ("100c", Coins::from_millicoins(100_000), "100c"),
+        ("100C", Coins::from_millicoins(100_000), "100c"),
         ("100.000c", Coins::from_millicoins(100_000), "100c"),
         ("3.140", Coins::from_millicoins(3_140), "3.14c"),
         ("3.14c", Coins::from_millicoins(3_140), "3.14c"),

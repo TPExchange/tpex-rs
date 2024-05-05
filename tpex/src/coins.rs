@@ -79,6 +79,7 @@ impl FromStr for Coins {
     fn from_str(s: &str) -> Result<Self> {
         // Trim trailing c
         let s = s.strip_suffix('c').unwrap_or(s);
+        let s = s.strip_suffix('C').unwrap_or(s);
         let Some((whole, frac)) = s.split_once('.')
         else {
             return

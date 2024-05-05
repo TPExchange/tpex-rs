@@ -214,7 +214,7 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                 let data = ctx.data().clone();
                 // Make a copy so that they can't claim some future withdrawal
                 let basket = basket.lock().await.clone();
-                let fee = data.sync().await.calc_withdrawal_fee(&basket)?.to_string();
+                let fee = data.sync().await.calc_withdrawal_fee(&basket)?;
                 let serenity_ctx = ctx.serenity_context().clone();
                 let player = player_id(ctx.author());
                 tokio::spawn(async move {
@@ -235,9 +235,11 @@ pub async fn new(ctx: Context<'_>) -> Result<(), Error> {
                         // ctx.say("Withdrawal canceled!").await?;
                         return Ok::<(), Error>(())
                     };
-                    if check_modal.inputs[0].to_ascii_lowercase() != fee.to_ascii_lowercase() {
-                        // ctx.say("Incorrect amount entered. Withdrawal canceled!").await?;
-                        return Ok(());
+                    match check_modal.inputs[0].to_ascii_lowercase().parse::<tpex::Coins>() {
+                        Ok(c) if c == fee => {},
+                        _ => {
+                            return Ok(())
+                        }
                     }
 
                     // Try to withdraw the items
