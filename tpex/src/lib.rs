@@ -19,21 +19,24 @@ pub use order::OrderType;
 pub use coins::Coins;
 
 pub const DIAMOND_NAME: &str = "diamond";
-const INITIAL_BANK_PRICES: UpdateBankPrices = UpdateBankPrices {
-    withdraw_flat: Coins::from_millicoins(1000),
-    withdraw_per_stack: Coins::from_millicoins(20),
-    expedited: Coins::from_millicoins(5000),
-    investment_share: 0.5,
+pub const DIAMOND_RAW_COINS: Coins = Coins::from_coins(1000);
+
+const INITIAL_BANK_RATES: BankRates = BankRates {
+    investment_ppm:     2_5000,
+    buy_order_ppm:      2_5000,
+    sell_order_ppm:     2_5000,
+    diamond_buy_ppm:    1_0000,
+    diamond_sell_ppm:   1_0000,
 };
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Default, Debug, Clone, Hash)]
 pub struct PlayerId(String);
 impl PlayerId {
-    #[deprecated = "Do not use this, use player_id instead"]
-    pub fn evil_constructor(s: String) -> PlayerId { PlayerId(s) }
-    #[deprecated = "Do not use this, use user_id instead"]
-    pub fn evil_deref(&self) -> &String { &self.0 }
-    pub fn the_bank() -> PlayerId { PlayerId("bank".to_owned()) }
+    /// Creates a player id, assuming that the given id is valid, correct, and authorized.
+    pub fn assume_username_correct(s: String) -> PlayerId { PlayerId(s) }
+    /// Gets the internal name of the user
+    pub fn get_raw_name(&self) -> &String { &self.0 }
+    pub fn the_bank() -> PlayerId { PlayerId("#tpex".to_owned()) }
 }
 impl<'de> Deserialize<'de> for PlayerId {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
@@ -96,10 +99,6 @@ pub enum Action {
         count: u64,
         banker: PlayerId,
     },
-    /// Player asked to expedite withdrawal
-    Expedited {
-        target: u64
-    },
     /// Player asked to withdraw assets
     WithdrawalRequested {
         player: PlayerId,
@@ -151,11 +150,9 @@ pub enum Action {
         new_count: u64
     },
     /// Changes the fees
-    UpdateBankPrices {
-        withdraw_flat: Coins,
-        withdraw_per_stack: Coins,
-        expedited: Coins,
-        investment_share: f64,
+    UpdateBankRates {
+        #[serde(flatten)]
+        rates: BankRates,
         banker: PlayerId,
     },
     // TODO: Not sure about these yet, let's see what demand we get
@@ -251,15 +248,15 @@ impl Action {
                 // TODO: find a way to track this nicely
                 None
             },
-            Action::BuyCoins { n_diamonds,.. } => {
-                audit.add_coins(Coins::from_diamonds(*n_diamonds).expect("BuyCoins overflow in audit"));
-                audit.sub_asset(DIAMOND_NAME.to_owned(), *n_diamonds);
-                Some(audit)
+            Action::BuyCoins { n_diamonds, .. } => {
+                audit.sub_asset(DIAMOND_NAME.into(), *n_diamonds);
+                audit.add_coins(DIAMOND_RAW_COINS.checked_mul(*n_diamonds).unwrap());
+                Some(audit.clone())
             },
             Action::SellCoins { n_diamonds, .. } => {
-                audit.sub_coins(Coins::from_diamonds(*n_diamonds).expect("SellCoins overflow in audit"));
-                audit.add_asset(DIAMOND_NAME.to_owned(), *n_diamonds);
-                Some(audit)
+                audit.add_asset(DIAMOND_NAME.into(), *n_diamonds);
+                audit.sub_coins(DIAMOND_RAW_COINS.checked_mul(*n_diamonds).unwrap());
+                Some(audit.clone())
             },
             _ => Some(audit)
         }
@@ -312,6 +309,12 @@ impl AddAssign for Audit {
         rhs.assets.into_iter().for_each(|(asset, count)| self.add_asset(asset, count));
     }
 }
+impl AddAssign<&Audit> for Audit {
+    fn add_assign(&mut self, rhs: &Audit) {
+        self.coins.checked_add_assign(rhs.coins).expect("Audit merge failed: coin overflow");
+        rhs.assets.iter().for_each(|(asset, count)| self.add_asset(asset.clone(), *count));
+    }
+}
 
 pub trait Auditable {
     // Check internal counters, will be called after every action
@@ -352,9 +355,10 @@ pub enum Error {
     InvestmentBusy{asset: AssetId, amount_over: u64},
     NotConvertable{from: AssetId, to: AssetId},
     AlreadyDone,
-    IsNotABanker{player: PlayerId},
+    NotABanker{player: PlayerId},
     CoinStringMangled,
-    CoinStringTooPrecise
+    CoinStringTooPrecise,
+    InvalidRates
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -393,15 +397,18 @@ impl std::fmt::Display for Error {
             Error::AlreadyDone => {
                 write!(f, "The requested action is redundant.")
             },
-            Error::IsNotABanker { player } => {
+            Error::NotABanker { player } => {
                 write!(f, "The requested action would require {player} to be a banker, but they are not.")
             },
             Error::CoinStringMangled => {
                 write!(f, "The system could not understand the given coin amount.")
             },
             Error::CoinStringTooPrecise => {
-            write!(f, "Too much precision was given for the coins: the system can only handle 3 decimal places.")
+                write!(f, "Too much precision was given for the coins: the system can only handle 3 decimal places.")
             },
+            Error::InvalidRates => {
+                write!(f, "The provided rates were invalid")
+            }
         }
 
     }
@@ -409,19 +416,38 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Serialize, Clone)]
-struct UpdateBankPrices {
-    withdraw_flat: Coins,
-    withdraw_per_stack: Coins,
-    expedited: Coins,
-    investment_share: f64
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+pub struct BankRates {
+    investment_ppm: u64,
+    buy_order_ppm: u64,
+    sell_order_ppm: u64,
+    diamond_buy_ppm: u64,
+    diamond_sell_ppm: u64
+}
+impl BankRates {
+    fn check(&self) -> Result<()> {
+        if
+            self.investment_ppm > 1_000_000 ||
+            // We don't need to limit this, as they just pay a lot, rather than losing money
+            // self.buy_order_ppm > 1_000_000 ||
+            self.sell_order_ppm > 1_000_000 ||
+            self.diamond_sell_ppm > 1_000_000
+            // We don't need to limit this, as they just pay a lot, rather than losing money
+            // self.diamond_buy_ppm > 1_000_000
+        {
+            Err(Error::InvalidRates)
+        }
+        else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct State {
     next_id: u64,
     asset_info: std::collections::HashMap<AssetId, AssetInfo>,
-    fees: UpdateBankPrices,
+    rates: BankRates,
 
     restricted_assets: std::collections::HashSet<AssetId>,
     authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
@@ -440,7 +466,7 @@ impl Default for State {
         let asset_info = serde_json::from_str(include_str!("../resources/assets.json")).expect("Could not parse asset_info");
         State {
             asset_info,
-            fees: INITIAL_BANK_PRICES,
+            rates: INITIAL_BANK_RATES,
             restricted_assets: Default::default(),
             authorisations: Default::default(),
             earnings: Default::default(),
@@ -470,22 +496,10 @@ impl State {
     pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, Coins> { self.balance.get_bals() }
     /// Get a player's assets
     pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> { self.balance.get_assets(player) }
-    /// Calculate the withdrawal fees
-    pub fn calc_withdrawal_fee(&self, assets: &std::collections::HashMap<AssetId, u64>) -> Result<Coins> {
-        let mut total_fee = self.fees.withdraw_flat;
-        for (asset, count) in assets {
-            total_fee.checked_add_assign(
-                self.fees.withdraw_per_stack.checked_mul(
-                    count.div_ceil(self.asset_info.get(asset).ok_or(Error::UnknownAsset{asset:asset.clone()})?.stack_size)
-                )?
-            )?
-        }
-        Ok(total_fee)
-    }
-    /// Get the expedite fee
-    pub fn expedite_fee(&self) -> Coins { self.fees.expedited }
     /// List all withdrawals
     pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawal> { self.withdrawal.get_withdrawals() }
+    /// List all withdrawals
+    pub fn get_withdrawal(&self, id: u64) -> Result<PendingWithdrawal> { self.withdrawal.get_withdrawal(id) }
     /// Get the withdrawal the bankers should examine next
     pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawal> { self.withdrawal.get_next_withdrawal() }
     /// List all orders
@@ -512,7 +526,7 @@ impl State {
             Action::AuthoriseRestricted { banker, .. } |
             Action::Deleted { banker, .. } |
             Action::Deposit { banker, .. } |
-            Action::UpdateBankPrices { banker, .. } |
+            Action::UpdateBankRates { banker, .. } |
             Action::UpdateBankers { banker, .. } |
             // Action::UpdateConvertables { banker, .. } |
             Action::UpdateInvestables { banker, .. } |
@@ -533,12 +547,16 @@ impl State {
             Action::WithdrawalRequested { player, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Normal, player: player.clone()}),
 
-            Action::Expedited { target } =>
-                Ok(ActionPermissions{level: ActionLevel::Normal, player: self.withdrawal.get_withdrawal(*target)?.player.clone()}),
             Action::CancelOrder { target } =>
                 Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target)?.player.clone()})
-
-
+        }
+    }
+    fn check_banker(&self, player: &PlayerId) -> Result<()> {
+        if self.bankers.contains(player) {
+            Ok(())
+        }
+        else {
+            Err(Error::NotABanker { player: player.clone() })
         }
     }
     // Atomic (but not parallelisable!).
@@ -550,13 +568,14 @@ impl State {
         // TODO: optimise
         if let ActionPermissions { level: ActionLevel::Banker, player } = self.perms(&action)? {
             if !self.is_banker(&player) {
-                return Err(Error::IsNotABanker { player });
+                return Err(Error::NotABanker { player });
             }
         }
 
         match action {
             Action::Deleted{..} => Ok(()),
-            Action::Deposit { player, asset, count, .. } => {
+            Action::Deposit { player, asset, count, banker } => {
+                self.check_banker(&banker)?;
                 if !self.asset_info.contains_key(&asset) {
                     return Err(Error::UnknownAsset { asset });
                 }
@@ -564,12 +583,11 @@ impl State {
 
                 Ok(())
             },
-            Action::Undeposit { player, asset, count, .. } => {
+            Action::Undeposit { player, asset, count, banker } => {
+                self.check_banker(&banker)?;
                 self.balance.commit_asset_removal(&player, &asset, count)
             },
             Action::WithdrawalRequested { player, assets} => {
-                let total_fee = self.calc_withdrawal_fee(&assets)?;
-
                 let mut tracked_assets: std::collections::HashMap<AssetId, u64> = Default::default();
                 // There's no good way of doing this without two passes, so we check then commit
                 //
@@ -591,8 +609,6 @@ impl State {
                     }
                     tracked_assets.insert(asset, count);
                 }
-                // Check they can afford the fee, and if they can, take it
-                self.balance.commit_coin_removal(&player, total_fee)?;
 
                 // Now take the assets, as we've confirmed they can afford it
                 for (asset, count) in tracked_assets.iter() {
@@ -607,30 +623,35 @@ impl State {
                 }
 
                 // Register the withdrawal. This cannot fail, so we don't have to worry about atomicity
-                self.withdrawal.track_withdrawal(id, player, tracked_assets, total_fee);
+                self.withdrawal.track_withdrawal(id, player, tracked_assets, Coins::default());
                 Ok(())
             },
             Action::SellOrder { player, asset, count, coins_per } => {
                 // Check and take their assets first
                 self.balance.commit_asset_removal(&player, &asset, count)?;
                 // Do the matching and listing
-                let res = self.order.handle_sell(id, &player, &asset, count, coins_per);
+                let res = self.order.handle_sell(id, &player, &asset, count, coins_per, self.rates.sell_order_ppm);
                 // Transfer the assets
                 for (buyer, count) in res.assets_instant_matched {
                     self.balance.commit_asset_add(&buyer, &asset, count);
                 }
                 // Transfer the money
                 self.balance.commit_coin_add(&player, res.coins_instant_earned);
+                // Pay the bank
+                self.balance.commit_coin_add(&PlayerId::the_bank(), res.instant_bank_fee);
 
                 Ok(())
             },
             Action::BuyOrder { player, asset, count, coins_per } => {
-                // Check and take their money first
-                self.balance.commit_coin_removal(&player, coins_per.checked_mul(count)?)?;
+                // Check their money first
+                let mut max_cost = coins_per.checked_mul(count)?;
+                max_cost.checked_add_assign(max_cost.fee_ppm(self.rates.buy_order_ppm)?)?;
+                self.balance.check_coin_removal(&player, max_cost)?;
+
                 // Do the matching and listing
-                let res = self.order.handle_buy(id, &player, &asset, count, coins_per);
+                let res = self.order.handle_buy(id, &player, &asset, count, coins_per, self.rates.buy_order_ppm);
                 // Transfer the money
-                self.balance.commit_coin_add(&player, res.coins_refunded);
+                self.balance.commit_coin_removal(&player, res.cost).expect("Somehow used more money in buy order than expected");
                 // Pay the sellers
                 for (seller, coins) in res.sellers {
                     self.balance.commit_coin_add(&seller, coins)
@@ -639,10 +660,13 @@ impl State {
                 if res.assets_instant_matched > 0 {
                     self.balance.commit_asset_add(&player, &asset, res.assets_instant_matched);
                 }
+                // Pay the bank
+                self.balance.commit_coin_add(&PlayerId::the_bank(), res.instant_bank_fee);
 
                 Ok(())
             },
             Action::WithdrawalCompleted { target, banker } => {
+                self.check_banker(&banker)?;
                 // Try to take out the pending transaction
                 let res = self.withdrawal.complete(target)?;
                 // Mark who delivered
@@ -666,17 +690,24 @@ impl State {
                 // Check and take diamonds from payer...
                 self.balance.commit_asset_removal(&player,&DIAMOND_NAME.to_owned(), n_diamonds)?;
                 // ... and give them the coins
-                self.balance.commit_coin_add(&player, Coins::from_diamonds(n_diamonds).expect("BuyCoins overflow")); // This panic stops inconsistencies
+                let n_coins = DIAMOND_RAW_COINS.checked_mul(n_diamonds).expect("BuyCoins overflow");
+                let fee = n_coins.fee_ppm(self.rates.diamond_sell_ppm).expect("BuyCoins fee overflow"); // This panic stops inconsistencies
+                self.balance.commit_coin_add(&PlayerId::the_bank(), fee);
+                self.balance.commit_coin_add(&player, n_coins.checked_sub(fee).unwrap()); // This panic stops inconsistencies
                 Ok(())
             },
             Action::SellCoins { player, n_diamonds } => {
                 // Check and take coins from payer...
-                self.balance.commit_coin_removal(&player, Coins::from_diamonds(n_diamonds)?)?;
+                let n_coins = DIAMOND_RAW_COINS.checked_mul(n_diamonds)?;
+                let fee = n_coins.fee_ppm(self.rates.diamond_sell_ppm)?; // This panic stops inconsistencies
+                self.balance.commit_coin_removal(&player, n_coins.checked_add(fee)?)?;
+                self.balance.commit_coin_add(&PlayerId::the_bank(), fee);
                 // ... and give them the diamonds
                 self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds);
                 Ok(())
             },
-            Action::UpdateRestricted { restricted_assets , ..} => {
+            Action::UpdateRestricted { restricted_assets , banker} => {
+                self.check_banker(&banker)?;
                 // Check they're valid assets
                 if let Some(asset) =
                     restricted_assets.iter()
@@ -687,7 +718,8 @@ impl State {
                 self.restricted_assets = std::collections::HashSet::from_iter(restricted_assets);
                 Ok(())
             },
-            Action::AuthoriseRestricted { authorisee, asset, new_count, .. } => {
+            Action::AuthoriseRestricted { authorisee, asset, new_count, banker } => {
+                self.check_banker(&banker)?;
                 // Check it's a valid asset (not necessarily authorisable to enable pre-authorisation)
                 if !self.asset_info.contains_key(&asset) {
                     return Err(Error::UnknownAsset { asset });
@@ -695,8 +727,13 @@ impl State {
                 self.authorisations.entry(authorisee).or_default().insert(asset, new_count);
                 Ok(())
             },
-            Action::UpdateBankPrices { withdraw_flat, withdraw_per_stack, expedited, investment_share , ..} => {
-                self.fees = UpdateBankPrices{ withdraw_flat, withdraw_per_stack, expedited, investment_share };
+            Action::UpdateBankRates { rates , banker } => {
+                // Check that the banker is actually a banker
+                self.check_banker(&banker)?;
+                // Check they're consistent
+                rates.check()?;
+                // Set the rates
+                self.rates = rates;
                 Ok(())
             },
             Action::TransferCoins { payer, payee, count } => {
@@ -713,25 +750,13 @@ impl State {
                 self.balance.commit_asset_add(&payee,  &asset, count);
                 Ok(())
             },
-            Action::Expedited { target, .. } => {
-                // Find the withdrawal
-                let withdrawal = self.withdrawal.get_withdrawal(id)?;
-                // If the withdrawal is already expedited, this should not be attempted
-                if withdrawal.expedited {
-                    return Err(Error::AlreadyDone)
-                }
-                // Take the coins, as expediting must now work
-                let fee = self.fees.expedited;
-                self.balance.commit_coin_removal(&withdrawal.player, fee)?;
-                // Expediting should always work here
-                self.withdrawal.expedite(target, fee).expect("Withdrawal exists and is normal but cannot be expedited");
-                Ok(())
-            },
-            Action::UpdateBankers { bankers, .. } => {
+            Action::UpdateBankers { bankers, banker } => {
+                self.check_banker(&banker)?;
                 self.bankers = std::collections::HashSet::from_iter(bankers);
                 Ok(())
             },
-            Action::UpdateInvestables { assets, .. } => {
+            Action::UpdateInvestables { assets, banker } => {
+                self.check_banker(&banker)?;
                 // Check they're valid assets
                 if let Some(asset) =
                     assets.iter()
@@ -793,10 +818,15 @@ impl State {
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
-    pub async fn replay(&mut self, trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin)) -> Result<()> {
+    pub async fn replay(&mut self, trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin), hard_audit: bool) -> Result<()> {
         let trade_file_reader = tokio::io::BufReader::new(trade_file);
         let mut trade_file_lines = trade_file_reader.lines();
-        let mut last_audit = self.hard_audit();
+        macro_rules! do_audit {
+            () => {
+                if hard_audit { self.hard_audit() } else { self.soft_audit() }
+            };
+        }
+        let mut last_audit = do_audit!();
         while let Some(line) = trade_file_lines.next_line().await.expect("Could not read line from trade list") {
             let wrapped_action: WrappedAction = serde_json::from_str(&line).expect("Corrupted trade file");
             if wrapped_action.id != self.next_id {
@@ -804,7 +834,7 @@ impl State {
             }
             self.apply_inner(self.next_id, wrapped_action.action.clone())?;
             if let Some(new_audit) = wrapped_action.action.adjust_audit(last_audit) {
-                let post = self.hard_audit();
+                let post = do_audit!();
                 if new_audit != post {
                     panic!("Failed audit on {line}: expected {new_audit:?} vs actual {post:?}");
                 }
@@ -812,7 +842,7 @@ impl State {
             }
             else {
                 // The state has changed, adjust the audit
-                last_audit = self.hard_audit();
+                last_audit = do_audit!();
             }
             self.next_id += 1;
         }
@@ -827,11 +857,11 @@ impl State {
             action: action.clone(),
         };
         let mut line = serde_json::to_string(&wrapped_action).expect("Cannot serialise action");
-        let pre = self.soft_audit();
+        let pre = self.hard_audit();
         self.apply_inner(self.next_id, wrapped_action.action)?;
         // We can soft audit, as the last one was checked as required
         if let Some(expected) = action.adjust_audit(pre) {
-            let post = self.hard_audit();
+            let post = self.soft_audit();
             if expected != post {
                 panic!("Failed audit on {line}: expected {expected:?} vs actual {post:?}");
             }
@@ -865,7 +895,7 @@ impl Serialize for State {
         map.serialize_entry("restricted", &self.restricted_assets)?;
         map.serialize_entry("investables", &self.investables)?;
         map.serialize_entry("bankers", &self.bankers)?;
-        map.serialize_entry("fees", &self.fees)?;
+        map.serialize_entry("rates", &self.rates)?;
         map.end()
     }
 }

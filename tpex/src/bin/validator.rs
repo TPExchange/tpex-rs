@@ -8,7 +8,7 @@ async fn main() {
     let mut txlog = tokio::fs::OpenOptions::new().read(true).open(&argv[1]).await.expect("Could not open txlog");
 
     let mut state = tpex::State::default();
-    if let Err(e) = state.replay(&mut txlog).await {
+    if let Err(e) = state.replay(&mut txlog, true).await {
         println!("Failed to replay line {} of state: {e}", state.get_next_id());
         return;
     }

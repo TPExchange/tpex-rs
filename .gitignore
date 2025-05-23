@@ -3,3 +3,7 @@
 trades.list
 Cargo.lock
 debug.db
+tpex-php/token.txt
+perf.data*
+flamegraph.svg
+tpex-capi.h

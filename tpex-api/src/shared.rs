@@ -26,7 +26,7 @@ impl<'de> Deserialize<'de> for TokenLevel {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
         struct Inner;
-        impl<'de> Visitor<'de> for Inner {
+        impl Visitor<'_> for Inner {
             type Value = TokenLevel;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -35,7 +35,7 @@ impl<'de> Deserialize<'de> for TokenLevel {
 
             fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
             where E: serde::de::Error, {
-                TokenLevel::from_u64(v).ok_or(E::invalid_value(serde::de::Unexpected::Unsigned(v as u64), &Self))
+                TokenLevel::from_u64(v).ok_or(E::invalid_value(serde::de::Unexpected::Unsigned(v), &Self))
             }
         }
         deserializer.deserialize_u64(Inner)
@@ -48,7 +48,7 @@ impl Token {
     #[cfg(feature = "bin")]
     pub fn generate() -> Token {
         let mut ret = Token(Default::default());
-        getrandom::getrandom(&mut ret.0).expect("Could not generate token");
+        getrandom::fill(&mut ret.0).expect("Could not generate token");
         ret
     }
 }
@@ -84,7 +84,7 @@ impl<'de> Deserialize<'de> for Token {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
         struct Inner;
-        impl<'de> Visitor<'de> for Inner {
+        impl Visitor<'_> for Inner {
             type Value = Token;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

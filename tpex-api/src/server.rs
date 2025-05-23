@@ -186,7 +186,7 @@ async fn main() {
 
         tpex_state.update_asset_info(serde_json::from_str(&assets).expect("Unable to parse asset info"))
     }
-    tpex_state.replay(&mut trade_file).await.expect("Could not replay trades");
+    tpex_state.replay(&mut trade_file, true).await.expect("Could not replay trades");
 
     let token_handler = tokens::TokenHandler::new(&args.db).await.expect("Could not connect to DB");
 

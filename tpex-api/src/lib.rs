@@ -100,7 +100,7 @@ impl Mirrored {
         let mut state = self.state.write().await;
         let cursor = std::io::Cursor::new(self.remote.get_state(state.get_next_id()).await.expect("Could not fetch state"));
         let mut buf = tokio::io::BufReader::new(cursor);
-        state.replay(&mut buf).await.expect("State unable to replay");
+        state.replay(&mut buf, true).await.expect("State unable to replay");
         state.downgrade()
     }
     pub async fn apply(&self, action: tpex::Action) -> Result<u64> {

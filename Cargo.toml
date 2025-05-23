@@ -3,6 +3,7 @@
 resolver = "2"
 members = [
   "tpex",
-  "trans-fer",
   "tpex-api"
-]
+, "tpex-capi"]
+[profile.release]
+debug = true

@@ -25,13 +25,16 @@ pub struct PendingOrder {
     pub player: PlayerId,
     pub amount_remaining: u64,
     pub asset: AssetId,
-    pub order_type: OrderType
+    pub order_type: OrderType,
+    pub fee_ppm: u64
 }
 
 #[derive(Default)]
 pub struct BuyData {
-    pub coins_refunded: Coins,
+    // pub coins_refunded: Coins,
+    pub cost: Coins,
     pub assets_instant_matched: u64,
+    pub instant_bank_fee: Coins,
     /// Maps sellers to the amount they're owed
     pub sellers: std::collections::HashMap<PlayerId, Coins>
 }
@@ -39,7 +42,8 @@ pub struct BuyData {
 #[derive(Default)]
 pub struct SellData {
     pub coins_instant_earned: Coins,
-    pub assets_instant_matched: std::collections::HashMap<PlayerId, u64>
+    pub assets_instant_matched: std::collections::HashMap<PlayerId, u64>,
+    pub instant_bank_fee: Coins,
 }
 pub enum CancelResult {
     BuyOrder{player: PlayerId, refund_coins: Coins},
@@ -183,7 +187,7 @@ impl OrderTracker {
     }
 
     #[must_use]
-    pub fn handle_buy(&mut self, id: u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins) -> BuyData {
+    pub fn handle_buy(&mut self, id: u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins, fee_ppm: u64) -> BuyData {
         let mut ret = BuyData::default();
 
         // Match the orders
@@ -212,23 +216,36 @@ impl OrderTracker {
                     order_ref.clone()
                 }
             };
+            // Calculate the number of coins ordered for the seller
+            let sale_coins = order.coins_per.checked_mul(match_res.order_taken).expect("Coins earnt overflow");
+
+            // Calculate the fee for the sell order
+            let seller_fee = sale_coins.fee_ppm(order.fee_ppm).expect("Fee overflow");
+            // We can now pass the fee to the bank
+            ret.instant_bank_fee.checked_add_assign(seller_fee).expect("Fee overflow");
+
+            // Calculate the fee for the buy order
+            let buyer_fee = sale_coins.fee_ppm(fee_ppm).expect("Fee overflow");
+            // We can now pass the fee to the bank
+            ret.instant_bank_fee.checked_add_assign(buyer_fee).expect("Fee overflow");
+
             // Give the assets ...
             ret.assets_instant_matched += match_res.order_taken;
-            // ... if they bought it cheap, give them the difference ...
-            ret.coins_refunded.checked_add_assign(
-                coins_per.checked_sub(order.coins_per).expect("Refund difference underflow")
-                .checked_mul(match_res.order_taken).expect("Matched coins overflow")
-            ).expect("Refund accumulator overflow");
+            ret.cost.checked_add_assign(sale_coins.checked_add(buyer_fee).expect("Fee overflow")).expect("Cost overflow");
+            // (they can't have saved on the fee, so they don't get a refund for that)
             // ... and track the seller
-            ret.sellers.entry(order.player).or_default().checked_add_assign(order.coins_per.checked_mul(match_res.order_taken).expect("Coins earnt overflow")).expect("Seller balance overflow");
+            ret.sellers.entry(order.player).or_default().checked_add_assign(sale_coins.checked_sub(seller_fee).expect("Fee greater than cost")).expect("Seller balance overflow");
         }
 
         // If needs be, list the remaining amount
         if amount_remaining > 0 {
+            let mut remaining_cost = coins_per.checked_mul(amount_remaining).expect("Buy order remaining coins overflow");
+            remaining_cost.checked_add_assign(remaining_cost.fee_ppm(fee_ppm).expect("Fee overflow")).expect("Buy order remaining fee coins overflow");
             self.best_buy.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
-            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.clone(), amount_remaining, asset: asset.clone(), order_type: OrderType::Buy });
+            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.clone(), amount_remaining, asset: asset.clone(), order_type: OrderType::Buy, fee_ppm });
             // We are responsible for the coins bound up in the buy order
-            self.current_audit.add_coins(coins_per.checked_mul(amount_remaining).expect("Buy order remaining coins overflow"));
+            self.current_audit.add_coins(remaining_cost);
+            ret.cost.checked_add_assign(remaining_cost).expect("Add remaining cost overflow");
         }
         // We are no longer responsible for the bought items
         self.current_audit.sub_asset(asset.clone(), ret.assets_instant_matched);
@@ -237,7 +254,7 @@ impl OrderTracker {
     }
 
     #[must_use]
-    pub fn handle_sell(&mut self, id:u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins) -> SellData {
+    pub fn handle_sell(&mut self, id:u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins, fee_ppm: u64) -> SellData {
         let mut ret = SellData::default();
 
         // Then match the orders
@@ -266,22 +283,35 @@ impl OrderTracker {
                     order_ref.clone()
                 }
             };
+            // Calculate the number of coins ordered for the seller
+            let sale_coins = order.coins_per.checked_mul(match_res.order_taken).expect("Sell order instant earned increment overflow");
+
+            // Calculate the fee for the sell order
+            let seller_fee = sale_coins.fee_ppm(fee_ppm).expect("Fee overflow");
+            // We can now pass the fee to the bank
+            ret.instant_bank_fee.checked_add_assign(seller_fee).expect("Fee overflow");
+
+            // Calculate the fee for the buy order
+            let buyer_fee = sale_coins.fee_ppm(order.fee_ppm).expect("Fee overflow");
+            // We can now pass the fee to the bank
+            ret.instant_bank_fee.checked_add_assign(buyer_fee).expect("Fee overflow");
+
             // Give the money ...
-            ret.coins_instant_earned.checked_add_assign(
-                order.coins_per.checked_mul(match_res.order_taken).expect("Sell order instant earned increment overflow")
-            ).expect("Sell order instant earned overflow");
+            ret.coins_instant_earned.checked_add_assign(sale_coins.checked_sub(seller_fee).expect("Fee greater than cost")).expect("Sell order instant earned overflow");
             // ... give the assets ...
             *ret.assets_instant_matched.entry(order.player).or_default() += match_res.order_taken;
+
+            // We are no longer responsible for the sale coins + fees
+            self.current_audit.sub_coins(sale_coins);
+            self.current_audit.sub_coins(buyer_fee);
         }
 
         // If needs be, list the remaining amount
         if amount_remaining > 0 {
             self.best_sell.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
-            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.clone(), amount_remaining, asset: asset.clone(), order_type: OrderType::Sell });
+            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.clone(), amount_remaining, asset: asset.clone(), order_type: OrderType::Sell, fee_ppm });
         }
 
-        // We are no longer responsible for the earnt coins
-        self.current_audit.sub_coins(ret.coins_instant_earned);
         // We are responsible for the remaining listed items
         self.current_audit.add_asset(asset.clone(), amount_remaining);
 
@@ -321,7 +351,11 @@ impl Auditable for OrderTracker {
         for order in self.orders.values() {
             match order.order_type {
                 // A buy order has taken coins from someone's account
-                OrderType::Buy => new_audit.add_coins(order.coins_per.checked_mul(order.amount_remaining).expect("Hard audit coin increment overflow")),
+                OrderType::Buy => {
+                    let mut cost = order.coins_per.checked_mul(order.amount_remaining).expect("Hard audit coin increment overflow");
+                    cost.checked_add_assign(cost.fee_ppm(order.fee_ppm).expect("Fee overflow")).expect("Hard audit coin fee increment overflow");
+                    new_audit.add_coins(cost);
+                },
                 // A buy order has taken assets from someone's account
                 OrderType::Sell => new_audit.add_asset(order.asset.clone(), order.amount_remaining),
             }

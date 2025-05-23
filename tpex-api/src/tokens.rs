@@ -1,17 +1,14 @@
 use std::str::FromStr;
 
-use axum::{async_trait, http::StatusCode};
+use axum::{http::StatusCode};
 use axum_extra::headers::{authorization::Bearer, Authorization, HeaderMapExt};
 use num_traits::FromPrimitive;
 use tpex::PlayerId;
 use crate::shared::*;
 
-
-#[async_trait]
 impl axum::extract::FromRequestParts<super::State> for TokenInfo {
     type Rejection = StatusCode;
 
-    #[allow(clippy::type_complexity,clippy::type_repetition_in_bounds)]
     async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &super::State) -> Result<Self, Self::Rejection> {
             let Some(auth) : Option<Authorization<Bearer>> = parts.headers.typed_get()
             else { return Err(StatusCode::UNAUTHORIZED); };
@@ -41,7 +38,7 @@ impl TokenHandler {
             pool: sqlx::SqlitePool::connect_with(opt).await?
         };
 
-        sqlx::migrate!("../migrations/api").run(&ret.pool).await?;
+        sqlx::migrate!("../migrations").run(&ret.pool).await?;
 
         Ok(ret)
     }
@@ -50,8 +47,7 @@ impl TokenHandler {
 
         let slice = token.0.as_slice();
         let level = level as i64;
-        #[allow(deprecated)]
-        let user = user.evil_deref();
+        let user = user.get_raw_name();
 
         sqlx::query!(r#"INSERT INTO tokens(token, level, user) VALUES (?, ?, ?)"#, slice, level, user)
         .execute(&self.pool).await?;
@@ -67,7 +63,7 @@ impl TokenHandler {
         Ok(TokenInfo {
             token: Token(query.token.try_into().expect("Mismatched token length")),
             #[allow(deprecated)]
-            user: tpex::PlayerId::evil_constructor(query.user),
+            user: tpex::PlayerId::assume_username_correct(query.user),
             level: TokenLevel::from_i64(query.level).expect("Invalid token level")
         })
     }

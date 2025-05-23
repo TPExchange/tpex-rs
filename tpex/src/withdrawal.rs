@@ -41,20 +41,6 @@ impl WithdrawalTracker {
         self.pending_normal_withdrawals.insert(id, PendingWithdrawal{ id, player, assets: assets.clone(), expedited: false, total_fee });
         self.current_audit += Audit{coins: total_fee, assets}
     }
-    pub fn expedite(&mut self, id: u64, fee: Coins) -> Result<(), Error> {
-        // Try to find this withdrawal
-        let std::collections::btree_map::Entry::Occupied(entry) = self.pending_normal_withdrawals.entry(id)
-        else { return Err(Error::InvalidId { id }); };
-        // Remove them from the normal list
-        let mut entry = entry.remove();
-        // Give them the expedited flag, and track the money
-        entry.expedited = true;
-        entry.total_fee.checked_add_assign(fee).expect("Withdraw fee overflow");
-        self.current_audit.add_coins(fee);
-        // Insert them into the expedited list
-        self.pending_expedited_withdrawals.insert(id, entry);
-        Ok(())
-    }
     pub fn complete(&mut self, id: u64) -> Result<PendingWithdrawal, Error> {
         // Try to take out the pending transaction
         let Some(res) = self.pending_normal_withdrawals.remove(&id).or_else(|| self.pending_expedited_withdrawals.remove(&id))
