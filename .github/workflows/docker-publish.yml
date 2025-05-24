@@ -6,7 +6,7 @@ on:
   schedule:
     - cron: '23 7 * * *'
   push:
-    branches: ["master", "staging"]
+    branches: ["master"]
     # Publish semver tags as releases.
     tags: [ 'v*.*.*' ]
 

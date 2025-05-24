@@ -2,6 +2,9 @@
 .vscode
 trades.list
 Cargo.lock
-Dockerfile
-.dockerignore
 debug.db
+tpex-php/token.txt
+perf.data*
+flamegraph.svg
+tpex-capi.h
+Dockerfile

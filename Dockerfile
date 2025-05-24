@@ -1,12 +1,13 @@
-FROM rust:alpine as cargo-build
+FROM rust:alpine AS cargo-build
 WORKDIR /opt/tpex
 RUN apk add clang
 COPY . .
-RUN cargo build --release
-RUN cargo test --release
+RUN RUSTFLAGS="-C target-feature=-crt-static" cargo build --release
+RUN RUSTFLAGS="-C target-feature=-crt-static" cargo test --release
 
 # ---
 
 FROM alpine
+RUN apk add libgcc
 USER 1000
-COPY --from=cargo-build /opt/tpex/target/release/tpex-srv /opt/tpex/target/release/trans-fer /usr/local/bin/
+COPY --from=cargo-build /opt/tpex/target/release/tpex-srv /usr/local/bin/
