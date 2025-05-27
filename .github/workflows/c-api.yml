@@ -1,5 +1,26 @@
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: <my-app>
-          path: target/${{ matrix.BUILD_TARGET }}/<my-app>
+name: Build tpex-capi
+
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  push:
+    branches: ["master"]
+    # Publish semver tags as releases.
+    tags: [ 'v*.*.*' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      release_built: ${{ steps.set-output.outputs.release_built }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build binaries in release mode
+      run: cargo build --profile release --package tpex-capi
+    - name: Upload release artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: tpex-capi
+        path: |
+          target/release/libtpex_capi.so
+          tpex-capi/tpex-capi.h
