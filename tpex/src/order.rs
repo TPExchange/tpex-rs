@@ -68,6 +68,10 @@ struct MatchResult<T> {
 }
 impl OrderTracker {
     pub fn get_order(&self, id: u64) -> Result<PendingOrder, Error> { self.orders.get(&id).cloned().ok_or(Error::InvalidId { id }) }
+    pub fn get_orders_filter<'a>(&'a self, filter: impl Fn(&'a PendingOrder) -> bool + 'a) -> impl Iterator<Item=PendingOrder> + 'a {
+        self.orders.iter()
+        .filter_map(move |(_i, j)| if filter(j) { Some(j.clone()) } else { None })
+    }
     pub fn get_all(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.orders.clone() }
     /// Prices for an asset, returns (price, amount) in (buy, sell)
     pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<Coins, u64>, std::collections::BTreeMap<Coins, u64>) {

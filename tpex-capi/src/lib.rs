@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use std::{pin::pin, str::FromStr, task::Context};
 
 use tpex::{Auditable, State};
@@ -70,6 +72,116 @@ impl Drop for Audit {
 pub unsafe extern "C" fn tpex_free_audit(audit: *mut Audit) {
     drop(unsafe { Box::from_raw(audit) })
 }
+
+#[repr(C)]
+#[derive(PartialEq, PartialOrd, Eq, Ord)]
+pub struct Level {
+    price_millicoins: u64,
+    count: u64
+}
+
+#[repr(C)]
+pub struct PriceLevels {
+    pub buy_levels: *mut Level,
+    pub buy_count: usize,
+    pub sell_levels: *mut Level,
+    pub sell_count: usize,
+}
+impl PriceLevels {
+    fn new<Buy: IntoIterator<Item=(tpex::Coins, u64)>, Sell: IntoIterator<Item=(tpex::Coins, u64)>>(buy: Buy, sell: Sell) -> Self {
+        let mut buy = buy.into_iter()
+            .map(|(price, count)| Level{price_millicoins: price.millicoins(), count})
+            .collect::<Vec<_>>();
+        let mut sell: Vec<Level> = sell.into_iter()
+            .map(|(price, count)| Level{price_millicoins: price.millicoins(), count})
+            .collect::<Vec<_>>();
+        // Cheapest sell price first
+        sell.sort_unstable();
+        // Most expensive buy price first
+        buy.sort_unstable_by(|x,y| y.cmp(x) );
+        let ret = PriceLevels {
+            buy_count: buy.len(),
+            buy_levels: buy.as_mut_ptr(),
+            sell_count: sell.len(),
+            sell_levels: sell.as_mut_ptr(),
+        };
+        std::mem::forget(buy);
+        std::mem::forget(sell);
+        ret
+    }
+}
+impl Drop for PriceLevels {
+    fn drop(&mut self) {
+        let buy: Vec<_> = unsafe { Vec::from_raw_parts(self.buy_levels, self.buy_count, self.buy_count) };
+        let sell: Vec<_> = unsafe { Vec::from_raw_parts(self.sell_levels, self.sell_count, self.sell_count) };
+        drop(buy);
+        drop(sell);
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tpex_free_price_levels(price_levels: *mut PriceLevels) {
+    drop(unsafe { Box::from_raw(price_levels) })
+}
+
+#[repr(C)]
+pub struct Order {
+    pub id: u64,
+    pub millicoins_per: u64,
+    pub player: *mut std::ffi::c_char,
+    pub amount_remaining: u64,
+    pub asset: *mut std::ffi::c_char,
+    pub is_sell: bool,
+    pub fee_ppm: u64,
+}
+impl From<&tpex::PendingOrder> for Order {
+    fn from(value: &tpex::PendingOrder) -> Self {
+        Order {
+            id: value.id,
+            millicoins_per: value.coins_per.millicoins(),
+            player: std::ffi::CString::from_str(value.player.get_raw_name()).expect("Null in username").into_raw(),
+            amount_remaining: value.amount_remaining,
+            asset: std::ffi::CString::from_str(&value.asset).expect("Null in asset name").into_raw(),
+            is_sell: match value.order_type { tpex::OrderType::Buy => false, tpex::OrderType::Sell => true },
+            fee_ppm: value.fee_ppm,
+        }
+    }
+}
+impl Drop for Order {
+    fn drop(&mut self) {
+        drop(unsafe { std::ffi::CString::from_raw(self.player) });
+        drop(unsafe { std::ffi::CString::from_raw(self.asset) });
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tpex_free_order(order: *mut Order) {
+    drop(unsafe { Box::from_raw(order) })
+}
+
+#[repr(C)]
+pub struct OrderList {
+    pub buy: *mut Order,
+    pub buy_count: usize,
+    pub sell: *mut Order,
+    pub sell_count: usize
+}
+impl OrderList {
+    fn new(mut buy: Vec<Order>, mut sell: Vec<Order>) -> Self {
+        let ret = OrderList {
+            buy_count: buy.len(),
+            buy: buy.as_mut_ptr(),
+            sell_count: sell.len(),
+            sell: sell.as_mut_ptr(),
+        };
+        std::mem::forget(buy);
+        std::mem::forget(sell);
+        ret
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tpex_free_order_list(order_list: *mut OrderList) {
+    drop(unsafe { Box::from_raw(order_list) })
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tpex_audit(state: *mut std::sync::RwLock<State>) -> *mut Audit {
     let state = unsafe { &mut *state }.read().unwrap();
@@ -96,41 +208,23 @@ pub unsafe extern "C" fn tpex_parse_millicoins(millicoins: *const std::ffi::c_ch
     let Ok(millicoins_safe) = unsafe { std::ffi::CStr::from_ptr(millicoins) }.to_str() else { return INVALID_COINS };
     tpex::Coins::from_str(millicoins_safe).map(|x| x.millicoins()).unwrap_or(INVALID_COINS)
 }
-// #[unsafe(no_mangle)]
-// pub unsafe extern "C" fn tpex_audit_player(state: *mut std::sync::RwLock<State>, player: *const std::ffi::c_char) -> Audit {
-//     let state = unsafe { &mut *state };
-//     let mut player = unsafe { std::ffi::CStr::from_ptr(player) }.to_str().unwrap();
-//     Audit { millicoins: () }
-//     state.get_bal(&tpex::PlayerId::evil_constructor(player.to_string())).millicoins()
-// }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tpex_get_prices(state: *mut std::sync::RwLock<State>, asset: *const std::ffi::c_char) -> *mut PriceLevels {
+    let state = unsafe { &mut *state }.read().unwrap();
+    let Ok(asset) = unsafe { std::ffi::CStr::from_ptr(asset) }.to_str().map(ToOwned::to_owned)
+    else { return std::ptr::null_mut() };
+    let (buy, sell) = state.get_prices(&asset);
+    Box::into_raw(Box::new(PriceLevels::new(buy, sell)))
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tpex_get_orders(state: *mut std::sync::RwLock<State>, player: *const std::ffi::c_char) -> *mut OrderList {
+    let state = unsafe { &mut *state }.read().unwrap();
+    let Ok(player) = unsafe { std::ffi::CStr::from_ptr(player) }.to_str().map(ToOwned::to_owned).map(tpex::PlayerId::assume_username_correct)
+    else { return std::ptr::null_mut() };
+    let (buy, sell) =
+        state.get_orders_filter(|i| i.player == player)
+        .map(|i| Order::from(&i))
+        .partition(|i| i.is_sell );
 
-// #[unsafe(no_mangle)]
-// pub unsafe extern "C" fn tpex_audit(state: *mut std::sync::RwLock<State>) -> u64 {
-// }
-
-// #[unsafe(no_mangle)]
-// pub unsafe extern "C" fn tpex_audit_player(state: *mut std::sync::RwLock<State>, player: *const std::ffi::c_char) -> Audit {
-//     let state = unsafe { &mut *state };
-//     let mut player = unsafe { std::ffi::CStr::from_ptr(player) }.to_str().unwrap();
-//     Audit { millicoins: () }state.get_bal(&tpex::PlayerId::evil_constructor(player.to_string())).millicoins()
-// }
-
-// pub struct OrderList {
-//     buy_orders: *mut [Order],
-//     sell_orders: *mut [Order],
-// }
-// pub struct Order {
-//     millicoins: u64,
-//     count: u64
-// }
-
-// #[unsafe(no_mangle)]
-// pub unsafe extern "C" fn tpex_free_order_list(OrderList: *mut OrderList) {
-//     Box::from
-// }
-
-// #[unsafe(no_mangle)]
-// pub unsafe extern "C" fn tpex_get(state: *mut std::sync::RwLock<State>) -> *mut [Order] {
-//     let state = unsafe { &mut *state };
-//     state.get_next_id()
-// }
+    Box::into_raw(Box::new(OrderList::new(buy, sell)))
+}

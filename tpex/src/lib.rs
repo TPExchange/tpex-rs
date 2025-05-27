@@ -5,7 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 // We use a base coins, which represent 1/1000 of a diamond
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 
-use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
+pub use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
 mod balance;
 mod investment;
@@ -504,6 +504,8 @@ impl State {
     pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawal> { self.withdrawal.get_next_withdrawal() }
     /// List all orders
     pub fn get_orders(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.order.get_all() }
+    /// List all orders
+    pub fn get_orders_filter<'a>(&'a self, filter: impl Fn(&PendingOrder) -> bool + 'a) -> impl Iterator<Item=PendingOrder> + 'a { self.order.get_orders_filter(filter) }
     /// Get a specific order
     pub fn get_order(&self, id: u64) -> Result<PendingOrder> { self.order.get_order(id) }
     /// Prices for an asset, returns (price, amount) in (buy, sell)
