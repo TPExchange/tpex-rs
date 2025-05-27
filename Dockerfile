@@ -2,7 +2,7 @@ FROM rust:alpine AS cargo-build
 WORKDIR /opt/tpex
 RUN apk add clang sqlite-dev
 COPY . .
-RUN LIBSQLITE3_SYS_USE_PKG_CONFIG=1 RUSTFLAGS="-C target-feature=-crt-static" cargo build --bin=tpex-srv --release --features=server
+RUN LIBSQLITE3_SYS_USE_PKG_CONFIG=1 RUSTFLAGS="-C target-feature=-crt-static" cargo build --bin=tpex-srv --release --features=server --no-default-features
 
 # ---
 

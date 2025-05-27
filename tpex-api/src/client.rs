@@ -1,4 +1,6 @@
 #![cfg(feature="client")]
+
+mod tests;
 mod shared;
 
 pub use shared::*;

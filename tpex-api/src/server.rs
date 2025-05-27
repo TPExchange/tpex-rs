@@ -1,4 +1,3 @@
-#[cfg(test)]
 mod tests;
 
 mod tokens;
@@ -9,6 +8,7 @@ use shared::*;
 use axum::Router;
 use clap::Parser;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tower_http::trace::TraceLayer;
 use tpex::{Action, ActionLevel};
 use std::io::Write;
 
@@ -209,6 +209,8 @@ async fn main() {
         .route("/token", axum::routing::delete(token_delete))
 
         .with_state(std::sync::Arc::new(state))
+
+        .layer(TraceLayer::new_for_http())
 
         .route_layer(cors);
 
