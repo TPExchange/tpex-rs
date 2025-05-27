@@ -45,7 +45,7 @@ impl<'de> Deserialize<'de> for TokenLevel {
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Token(pub [u8;16]);
 impl Token {
-    #[cfg(feature = "bin")]
+    #[cfg(feature = "server")]
     pub fn generate() -> Token {
         let mut ret = Token(Default::default());
         getrandom::fill(&mut ret.0).expect("Could not generate token");

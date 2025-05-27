@@ -12,7 +12,6 @@ mod investment;
 mod order;
 mod withdrawal;
 mod coins;
-#[cfg(test)]
 mod tests;
 
 pub use order::OrderType;
