@@ -1,14 +1,14 @@
 name: Build tpex-capi
 
 on:
-  schedule:
-    - cron: '23 7 * * *'
-  push:
-    branches: ["master"]
-    tags: [ 'v*.*.*' ]
+  workflow_run: 
+    workflows: ["Run unit tests"]
+    # Include tags
+    branches: ["master", 'v*.*.*']
 
 jobs:
   build:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       release_built: ${{ steps.set-output.outputs.release_built }}
