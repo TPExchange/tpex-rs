@@ -5,7 +5,6 @@ on:
     - cron: '23 7 * * *'
   push:
     branches: ["master"]
-    # Publish semver tags as releases.
     tags: [ 'v*.*.*' ]
 
 jobs:
@@ -17,10 +16,10 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build binaries in release mode
       run: cargo build --profile release --package tpex-capi
+    - name: Move binaries to a nice folder
+      run: mkdir /tmp/tpex-capi && cp target/release/libtpex_capi.so tpex-capi/tpex-capi.h /tmp/tpex-capi
     - name: Upload release artifact
       uses: actions/upload-artifact@v4
       with:
         name: tpex-capi
-        path: |
-          target/release/libtpex_capi.so
-          tpex-capi/tpex-capi.h
+        path: /tmp/tpex-capi
