@@ -7,7 +7,7 @@ edition = "2024"
 
 [dependencies]
 tpex = { path = "../tpex", version = "^0.3.0" }
-tokio = { version = "^1.36.0", features = ["default", "rt-multi-thread"] }
+tokio = { version = "^1.36.0", features = ["rt-multi-thread", "sync"] }
 base64 = "^0.22.0"
 num-traits = { version = "^0.2" }
 num-derive = { version = "^0.4" }
@@ -15,25 +15,30 @@ serde = { version = "^1.0", features = ["std"] }
 
 axum-extra = { version = "^0.10", features = ["typed-header", "query"], optional = true }
 sqlx = { version = "^0.8.5", features = ["runtime-tokio", "sqlite"], optional = true }
-axum = { version = "^0.8.4", features = ["macros"], optional = true }
+axum = { version = "^0.8.4", optional = true }
 getrandom = { version = "^0.3", optional = true }
 serde_json = { version = "^1.0.114", optional = true }
 clap = { version = "^4.5.4", features = ["derive"], optional = true }
-tower-http = { version = "^0.6", features = ["cors"], optional = true}
+tower-http = { version = "^0.6", features = ["cors", "trace"], optional = true}
+tracing-subscriber = { version = "^0.3", features=["env-filter"], optional=true }
+tracing = { version = "^0.1.41", optional=true }
 
-reqwest = {version = ">=0.11,<0.13", default-features = false, features = ["json", "rustls-tls"], optional = true}
+reqwest = {version = "^0.12", default-features = false, features = ["json"], optional = true}
+
+[dev-dependencies]
+tokio = { version = "^1.45.0", features = ["test-util"] }
 
 [features]
-bin = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json", "dep:clap", "dep:tower-http"]
-lib = ["dep:reqwest"]
-default = ["lib", "bin"]
+server = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json", "dep:clap", "dep:tower-http", "dep:tracing-subscriber", "dep:tracing"]
+client = ["dep:reqwest"]
+default = ["server", "client"]
 
 [[bin]]
 name = "tpex-srv"
 path = "src/server.rs"
-required-features = ["bin"]
+required-features = ["server"]
 
 [lib]
 name = "tpex_api"
-path = "src/lib.rs"
-required-features = ["lib"]
+path = "src/client.rs"
+required-features = ["client"]

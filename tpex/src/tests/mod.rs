@@ -1,3 +1,4 @@
+#![cfg(test)]
 
 use std::{collections::{BTreeMap, HashMap}, fmt::Display};
 
