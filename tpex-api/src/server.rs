@@ -10,7 +10,9 @@ use clap::Parser;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tower_http::trace::TraceLayer;
 use tpex::{Action, ActionLevel};
+use tracing::{info_span, warn_span};
 use std::io::Write;
+use tracing_subscriber::EnvFilter;
 
 #[derive(clap::Parser)]
 struct Args {
@@ -167,6 +169,15 @@ async fn token_delete(
 }
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .or_else(|_| EnvFilter::try_new("info"))
+                .unwrap(),
+        )
+        .init();
+
+
     sqlx::any::install_default_drivers();
     // Crash on inconsistency
     std::panic::set_hook(Box::new(move |info| {
