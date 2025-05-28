@@ -1,12 +1,12 @@
 use std::{collections::HashSet, ops::{Add, AddAssign}};
 
 use auth::AuthSync;
-use balance::{BalanceSync, BalanceTracker};
+use balance::BalanceSync;
 use investment::InvestmentSync;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 // We use a base coins, which represent 1/1000 of a diamond
-use serde::{ser::{SerializeMap, SerializeStruct}, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 pub use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
@@ -592,27 +592,26 @@ impl State {
                 self.balance.commit_asset_removal(&player, &asset, count)
             },
             Action::WithdrawalRequested { player, assets} => {
-                let mut tracked_assets: std::collections::HashMap<AssetId, u64> = Default::default();
                 // There's no good way of doing this without two passes, so we check then commit
                 //
                 // BTreeMap ensures that the same asset cannot occur twice, so we don't have to worry about double spending
-                for (asset, count) in assets {
+                for (asset, count) in assets.iter() {
                     // Check to see if they can afford it
-                    self.balance.check_asset_removal(&player, &asset, count)?;
+                    self.balance.check_asset_removal(&player, asset, *count)?;
                     // Check to see if they are allowed it
-                    self.auth.check_withdrawal_authorized(&player, &asset, count);
+                    self.auth.check_withdrawal_authorized(&player, asset, *count)?;
                 }
 
                 // Now take the assets, as we've confirmed they can afford it
-                for (asset, count) in tracked_assets.iter() {
+                for (asset, count) in assets.iter() {
                     // Remove assets
                     self.balance.commit_asset_removal(&player, asset, *count).expect("Assets disappeared after check");
                     // Remove allowance if restricted
-                    self.auth.commit_withdrawal_authorized(&player, &asset, *count).expect("Auth disappeared after check");
+                    self.auth.commit_withdrawal_authorized(&player, asset, *count).expect("Auth disappeared after check");
                 }
 
                 // Register the withdrawal. This cannot fail, so we don't have to worry about atomicity
-                self.withdrawal.track_withdrawal(id, player, tracked_assets, Coins::default());
+                self.withdrawal.track_withdrawal(id, player, assets, Coins::default());
                 Ok(())
             },
             Action::SellOrder { player, asset, count, coins_per } => {
@@ -882,7 +881,13 @@ pub struct StateSync {
 }
 impl From<&State> for StateSync {
     fn from(value: &State) -> Self {
-        todo!()
+        Self {
+            next_id: value.next_id,
+            balances: (&value.balance).into(),
+            rates: value.rates.clone(),
+            auth: (&value.auth).into(),
+            investment: (&value.investment).into(),
+        }
     }
 }
 impl TryFrom<StateSync> for State {
@@ -890,11 +895,11 @@ impl TryFrom<StateSync> for State {
     fn try_from(value: StateSync) -> Result<Self> {
         Ok(Self {
             next_id: value.next_id,
-            asset_info: todo!(),
             rates: value.rates,
-            earnings: todo!(),
             balance: value.balances.try_into()?,
             investment: value.investment.try_into()?,
+            asset_info: todo!(),
+            earnings: todo!(),
             order: todo!(),
             withdrawal: todo!(),
             auth: todo!(),

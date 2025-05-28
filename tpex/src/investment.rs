@@ -9,6 +9,11 @@ pub struct InvestmentSync {
     pub investables: std::collections::HashSet<AssetId>,
     pub investments: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
 }
+impl From<&InvestmentTracker> for InvestmentSync {
+    fn from(value: &InvestmentTracker) -> Self {
+        InvestmentSync { investables: value.investables.clone(), investments: value.player_investments.clone() }
+    }
+}
 impl TryFrom<InvestmentSync> for InvestmentTracker {
     type Error = Error;
 
