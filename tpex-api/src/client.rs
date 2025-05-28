@@ -4,7 +4,7 @@ mod tests;
 mod shared;
 
 pub use shared::*;
-use tpex::{AssetId, AssetInfo, State};
+use tpex::{AssetId, AssetInfo, State, StateSync};
 
 pub use shared::Token;
 
@@ -27,6 +27,9 @@ impl From<reqwest::Error> for Error {
 }
 impl From<ErrorInfo> for Error {
     fn from(value: ErrorInfo) -> Self { Error::TPExFailure(value) }
+}
+impl From<tpex::Error> for Error {
+    fn from(value: tpex::Error) -> Self { Error::TPExFailure(ErrorInfo { error: value.to_string() }) }
 }
 
 
@@ -83,6 +86,12 @@ impl Remote {
 
         Ok(Self::check_response(self.client.delete(target).json(args).send().await?).await?.json().await?)
     }
+    pub async fn fastsync(&self) -> Result<StateSync> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /token").push("fastsync");
+
+        Ok(Self::check_response(self.client.post(target).send().await?).await?.json().await?)
+    }
 }
 
 pub struct Mirrored {
@@ -99,12 +108,18 @@ impl Mirrored {
     pub async fn update_asset_info(&self, asset_info: std::collections::HashMap<AssetId, AssetInfo>) {
         self.state.write().await.update_asset_info(asset_info)
     }
-    pub async fn sync(&self) -> tokio::sync::RwLockReadGuard<State> {
+    pub async fn fastsync(&self) -> Result<tokio::sync::RwLockReadGuard<State>> {
+        let new_state: State = self.remote.fastsync().await?.try_into()?;
         let mut state = self.state.write().await;
-        let cursor = std::io::Cursor::new(self.remote.get_state(state.get_next_id()).await.expect("Could not fetch state"));
+        *state = new_state;
+        Ok(state.downgrade())
+    }
+    pub async fn sync(&self) -> Result<tokio::sync::RwLockReadGuard<State>> {
+        let mut state = self.state.write().await;
+        let cursor = std::io::Cursor::new(self.remote.get_state(state.get_next_id()).await?);
         let mut buf = tokio::io::BufReader::new(cursor);
         state.replay(&mut buf, true).await.expect("State unable to replay");
-        state.downgrade()
+        Ok(state.downgrade())
     }
     pub async fn apply(&self, action: tpex::Action) -> Result<u64> {
         // The remote could be desynced, so we send our update

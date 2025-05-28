@@ -1,9 +1,12 @@
 use std::{collections::HashSet, ops::{Add, AddAssign}};
 
+use auth::AuthSync;
+use balance::{BalanceSync, BalanceTracker};
+use investment::InvestmentSync;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 // We use a base coins, which represent 1/1000 of a diamond
-use serde::{Deserialize, Serialize, ser::SerializeMap};
+use serde::{ser::{SerializeMap, SerializeStruct}, Deserialize, Serialize};
 
 pub use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
@@ -12,6 +15,7 @@ mod investment;
 mod order;
 mod withdrawal;
 mod coins;
+mod auth;
 mod tests;
 
 pub use order::OrderType;
@@ -84,7 +88,7 @@ pub struct AutoConversion {
     pub n_to: u64
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum Action {
     /// Deleted transaction, for when someone does a bad
     Deleted {
@@ -142,6 +146,8 @@ pub enum Action {
         banker: PlayerId,
     },
     /// Allows a player to place new withdrawal requests up to new_count of an item
+    ///
+    /// XXX: This can and will nuke existing values, so check those race conditions!
     AuthoriseRestricted {
         authorisee: PlayerId,
         banker: PlayerId,
@@ -322,7 +328,7 @@ pub trait Auditable {
     fn hard_audit(&self) -> Audit;
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct WrappedAction {
     // The id of the action, which should equal the line number of the trades list
     id: u64,
@@ -332,7 +338,7 @@ pub struct WrappedAction {
     action: Action,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct AssetInfo {
     stack_size: u64
 }
@@ -345,7 +351,11 @@ pub enum Error {
     OverdrawnCoins {
         amount_overdrawn: Coins
     },
-    UnauthorisedWithdrawal{asset: AssetId, amount_overdrawn: Option<u64>},
+    UnauthorisedWithdrawal{
+        asset: AssetId,
+        // Set to be None if the player has no authorization at all to withdraw this
+        amount_overdrawn: Option<u64>
+    },
     /// Some 1337 hacker tried an overflow attack >:(
     Overflow,
     InvalidId{id: u64},
@@ -445,16 +455,11 @@ impl BankRates {
 #[derive(Debug, Clone)]
 pub struct State {
     next_id: u64,
-    asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     rates: BankRates,
-
-    restricted_assets: std::collections::HashSet<AssetId>,
-    authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
-    investables: std::collections::HashSet<AssetId>,
-
     earnings: std::collections::HashMap<PlayerId, Coins>,
-    bankers: std::collections::HashSet<PlayerId>,
 
+    asset_info: std::collections::HashMap<AssetId, AssetInfo>,
+    auth: auth::AuthTracker,
     balance: balance::BalanceTracker,
     investment: investment::InvestmentTracker,
     order: order::OrderTracker,
@@ -464,19 +469,16 @@ impl Default for State {
     fn default() -> State {
         let asset_info = serde_json::from_str(include_str!("../resources/assets.json")).expect("Could not parse asset_info");
         State {
-            asset_info,
             rates: INITIAL_BANK_RATES,
-            restricted_assets: Default::default(),
-            authorisations: Default::default(),
             earnings: Default::default(),
             // Start on ID 1 for nice mapping to line numbers
             next_id: 1,
-            bankers: [PlayerId::the_bank()].into_iter().collect(),
-            investables: Default::default(),
+            auth: Default::default(),
             balance: Default::default(),
             investment: Default::default(),
             order: Default::default(),
             withdrawal: Default::default(),
+            asset_info,
         }
     }
 }
@@ -486,6 +488,10 @@ impl State {
     /// Adds or updates the given asset infos
     pub fn update_asset_info(&mut self, asset_info: std::collections::HashMap<AssetId, AssetInfo>) {
         self.asset_info.extend(asset_info);
+    }
+    /// Gets info about a certain asset
+    pub fn asset_info(&self, asset: &AssetId) -> Result<AssetInfo> {
+        self.asset_info.get(asset).cloned().ok_or_else(|| Error::UnknownAsset { asset: asset.clone() })
     }
     /// Get the next line
     pub fn get_next_id(&self) -> u64 { self.next_id }
@@ -510,17 +516,13 @@ impl State {
     /// Prices for an asset, returns (price, amount) in (buy, sell)
     pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<Coins, u64>, std::collections::BTreeMap<Coins, u64>) { self.order.get_prices(asset) }
     /// Returns true if the given item is currently restricted
-    pub fn is_restricted(&self, asset: &AssetId) -> bool { self.restricted_assets.contains(asset) }
+    pub fn is_restricted(&self, asset: &AssetId) -> bool { self.auth.is_restricted(asset) }
     /// Lists all restricted items
-    pub fn get_restricted(&self) -> impl Iterator<Item = &AssetId> { self.restricted_assets.iter() }
+    pub fn get_restricted(&self) -> impl Iterator<Item = &AssetId> { self.auth.get_restricted() }
     /// Gets a list of all bankers
-    pub fn get_bankers(&self) -> HashSet<PlayerId> { self.bankers.clone() }
+    pub fn get_bankers(&self) -> HashSet<PlayerId> { self.auth.get_bankers() }
     /// Returns true if the given player is an banker
-    pub fn is_banker(&self, player: &PlayerId) -> bool { self.bankers.contains(player) }
-    /// Gets info about a certain asset
-    pub fn asset_info(&self, asset: &AssetId) -> Result<AssetInfo> {
-        self.asset_info.get(asset).cloned().ok_or_else(|| Error::UnknownAsset { asset: asset.clone() })
-    }
+    pub fn is_banker(&self, player: &PlayerId) -> bool { self.auth.is_banker(player) }
     /// Get the required permissions for a given action
     pub fn perms(&self, action: &Action) -> Result<ActionPermissions> {
         match action {
@@ -552,8 +554,9 @@ impl State {
                 Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target)?.player.clone()})
         }
     }
+    /// Nice macro for checking whether a player is a banker
     fn check_banker(&self, player: &PlayerId) -> Result<()> {
-        if self.bankers.contains(player) {
+        if self.auth.is_banker(player) {
             Ok(())
         }
         else {
@@ -596,19 +599,8 @@ impl State {
                 for (asset, count) in assets {
                     // Check to see if they can afford it
                     self.balance.check_asset_removal(&player, &asset, count)?;
-                    let is_restricted = self.is_restricted(&asset);
-                    // Check if restricted
-                    if is_restricted {
-                        // If it is restricted, we have to check before we take their assets
-                        // Check if they are authorised to withdraw any amount of these items
-                        let Some(auth_amount) = self.authorisations.get(&player).and_then(|x| x.get(&asset))
-                        else { return Err(Error::UnauthorisedWithdrawal{ asset: asset.clone(), amount_overdrawn: None}); };
-                        // Check if they are authorised to withdraw at least this many items
-                        if *auth_amount < count {
-                            return Err(Error::UnauthorisedWithdrawal{ asset: asset.clone(), amount_overdrawn: Some(count - *auth_amount)});
-                        }
-                    }
-                    tracked_assets.insert(asset, count);
+                    // Check to see if they are allowed it
+                    self.auth.check_withdrawal_authorized(&player, &asset, count);
                 }
 
                 // Now take the assets, as we've confirmed they can afford it
@@ -616,11 +608,7 @@ impl State {
                     // Remove assets
                     self.balance.commit_asset_removal(&player, asset, *count).expect("Assets disappeared after check");
                     // Remove allowance if restricted
-                    if self.is_restricted(asset) {
-                        // TODO: Clean up after ourselves
-                        *self.authorisations.get_mut(&player).expect("Asset player disappeared after check")
-                                            .get_mut(asset).expect("Asset auth disappeared after check") -= count;
-                    }
+                    self.auth.commit_withdrawal_authorized(&player, &asset, *count).expect("Auth disappeared after check");
                 }
 
                 // Register the withdrawal. This cannot fail, so we don't have to worry about atomicity
@@ -716,7 +704,7 @@ impl State {
                 {
                     return Err(Error::UnknownAsset { asset: asset.clone() });
                 }
-                self.restricted_assets = std::collections::HashSet::from_iter(restricted_assets);
+                self.auth.update_restricted(FromIterator::from_iter(restricted_assets));
                 Ok(())
             },
             Action::AuthoriseRestricted { authorisee, asset, new_count, banker } => {
@@ -725,7 +713,7 @@ impl State {
                 if !self.asset_info.contains_key(&asset) {
                     return Err(Error::UnknownAsset { asset });
                 }
-                self.authorisations.entry(authorisee).or_default().insert(asset, new_count);
+                self.auth.set_authorisation(authorisee, asset, new_count);
                 Ok(())
             },
             Action::UpdateBankRates { rates , banker } => {
@@ -753,7 +741,7 @@ impl State {
             },
             Action::UpdateBankers { bankers, banker } => {
                 self.check_banker(&banker)?;
-                self.bankers = std::collections::HashSet::from_iter(bankers);
+                self.auth.update_bankers(FromIterator::from_iter(bankers));
                 Ok(())
             },
             Action::UpdateInvestables { assets, banker } => {
@@ -765,12 +753,12 @@ impl State {
                 {
                     return Err(Error::UnknownAsset { asset: asset.clone() });
                 }
-                self.investables = assets.into_iter().collect();
+                self.investment.update_investables(FromIterator::from_iter(assets));
                 Ok(())
             },
             Action::Invest { player, asset, count } => {
-                // Check to see if we can invest it
-                if !self.investables.contains(&asset) {
+                // Check to see if we can invest it before we commit to its removal
+                if !self.investment.is_investable(&asset) {
                     return Err(Error::NotInvestable {asset});
                 }
                 // Check to see if the user can afford it, and if so, invest
@@ -884,19 +872,32 @@ impl Auditable for State {
     }
 }
 
-impl Serialize for State {
-    // Returns an object that can be used to check we haven't gone off the rails
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> where S: serde::Serializer {
-        let mut map = serializer.serialize_map(None)?;
-        map.serialize_entry("next_id", &self.next_id)?;
-        map.serialize_entry("balance", &self.balance)?;
-        map.serialize_entry("order", &self.order)?;
-        map.serialize_entry("investment", &self.investment)?;
-        map.serialize_entry("authorisations", &self.authorisations)?;
-        map.serialize_entry("restricted", &self.restricted_assets)?;
-        map.serialize_entry("investables", &self.investables)?;
-        map.serialize_entry("bankers", &self.bankers)?;
-        map.serialize_entry("rates", &self.rates)?;
-        map.end()
+#[derive(Serialize, Deserialize)]
+pub struct StateSync {
+    pub next_id: u64,
+    pub balances: BalanceSync,
+    pub rates: BankRates,
+    pub auth: AuthSync,
+    pub investment: InvestmentSync
+}
+impl From<&State> for StateSync {
+    fn from(value: &State) -> Self {
+        todo!()
+    }
+}
+impl TryFrom<StateSync> for State {
+    type Error = Error;
+    fn try_from(value: StateSync) -> Result<Self> {
+        Ok(Self {
+            next_id: value.next_id,
+            asset_info: todo!(),
+            rates: value.rates,
+            earnings: todo!(),
+            balance: value.balances.try_into()?,
+            investment: value.investment.try_into()?,
+            order: todo!(),
+            withdrawal: todo!(),
+            auth: todo!(),
+        })
     }
 }

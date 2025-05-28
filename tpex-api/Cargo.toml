@@ -27,6 +27,7 @@ reqwest = {version = "^0.12", default-features = false, features = ["json"], opt
 
 [dev-dependencies]
 tokio = { version = "^1.45.0", features = ["test-util"] }
+axum = { version = "^0.8.4", features = ["macros"] }
 
 [features]
 server = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json", "dep:clap", "dep:tower-http", "dep:tracing-subscriber", "dep:tracing"]

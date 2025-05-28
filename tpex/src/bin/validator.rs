@@ -14,5 +14,5 @@ async fn main() {
     }
 
     println!("State replayed successfully:");
-    println!("{}",serde_json::to_string_pretty(&state).expect("Could not serialise state"));
+    println!("{}",serde_json::to_string_pretty(&tpex::StateSync::from(&state)).expect("Could not serialise state"));
 }

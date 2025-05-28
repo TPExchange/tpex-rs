@@ -1,11 +1,43 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::Coins;
 
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
+#[derive(Serialize, Deserialize)]
+pub struct BalanceSync {
+    pub balances: std::collections::HashMap<PlayerId, Coins>,
+    pub assets: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
+}
+impl From<&BalanceTracker> for BalanceSync {
+    fn from(value: &BalanceTracker) -> Self {
+        BalanceSync { balances: value.balances.clone(), assets: value.assets.clone() }
+    }
+}
+impl TryFrom<BalanceSync> for BalanceTracker {
+    type Error = Error;
 
-#[derive(Default, Debug, Serialize, Clone)]
+    fn try_from(value: BalanceSync) -> Result<Self, Self::Error> {
+        let current_audit = Audit {
+            coins: value.balances.values().try_fold(Coins::default(), |x, y| x.checked_add(*y))?,
+            assets: value.assets.values()
+                .try_fold(std::collections::HashMap::default(), |mut acc, assets| {
+                    for (asset_name, asset_count) in assets {
+                        let tgt: &mut u64 = acc.entry(asset_name.clone()).or_default();
+                        *tgt = tgt.checked_add(*asset_count).ok_or(Error::Overflow)?;
+                    }
+                    Ok(acc)
+                })?
+        };
+        Ok(BalanceTracker {
+            balances: value.balances,
+            assets: value.assets,
+            current_audit
+        })
+    }
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct BalanceTracker {
     balances: std::collections::HashMap<PlayerId, Coins>,
     assets: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
@@ -104,7 +136,8 @@ impl BalanceTracker {
     }
     /// Increases a player's asset count
     pub fn commit_asset_add(&mut self, player: &PlayerId, asset: &AssetId, count: u64) {
-        *self.assets.entry(player.clone()).or_default().entry(asset.clone()).or_default() += count;
+        let tgt = self.assets.entry(player.clone()).or_default().entry(asset.clone()).or_default();
+        *tgt = tgt.checked_add(count).ok_or(Error::Overflow).expect("Item count overflow");
         self.current_audit.add_asset(asset.clone(), count);
     }
     /// Increases a player's coin count

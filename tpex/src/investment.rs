@@ -1,18 +1,43 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::Coins;
 
 use super::{AssetId, Audit, Auditable, PlayerId, Error};
 
-// #[derive(Debug, Serialize)]
-// struct Investment {
-//     player: PlayerId,
-//     asset: AssetId,
-//     count: u64
-// }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InvestmentSync {
+    pub investables: std::collections::HashSet<AssetId>,
+    pub investments: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
+}
+impl TryFrom<InvestmentSync> for InvestmentTracker {
+    type Error = Error;
 
-#[derive(Default, Debug, Serialize, Clone)]
+    fn try_from(value: InvestmentSync) -> Result<Self, Error> {
+        let mut asset_investments: std::collections::HashMap<String, std::collections::HashMap<PlayerId, u64>> = Default::default();
+        for (player, assets) in value.investments.iter() {
+            for (asset, count) in assets {
+                let target =
+                    match asset_investments.get_mut(asset) {
+                        Some(x) => x,
+                        None => asset_investments.entry(asset.clone()).or_default()
+                    };
+                target.insert(player.clone(), *count);
+            }
+        }
+        todo!()
+        // let mut amount_invested: std::collections::HashMap<AssetId, u64> =
+        //     asset_investments.iter().map(|(i, j)| (i, j.keys().try_fold()))
+        // Ok(InvestmentTracker {
+        //     investables: value.investables,
+        //     asset_investments
+        // })
+    }
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct InvestmentTracker {
+    investables: std::collections::HashSet<AssetId>,
+
     // These three tables must be kept consistent
     asset_investments: std::collections::HashMap<AssetId, std::collections::HashMap<PlayerId, u64>>,
     player_investments: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
@@ -24,6 +49,15 @@ pub struct InvestmentTracker {
     current_audit: Audit
 }
 impl InvestmentTracker {
+    /// Updates the list of investable assets
+    pub fn update_investables(&mut self, investables: std::collections::HashSet<AssetId>) {
+        self.investables = investables;
+    }
+    /// Checks whether an asset is investable
+    pub fn is_investable(&self, asset: &AssetId) -> bool {
+        self.investables.contains(asset)
+    }
+
     // /// Distribute the profits among the investors
     // fn distribute_profit(&mut self, asset: &AssetId, amount: u64) {
     //     let mut investors = self.investment.get_investors(asset);

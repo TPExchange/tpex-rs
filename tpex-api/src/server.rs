@@ -9,8 +9,7 @@ use axum::Router;
 use clap::Parser;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tower_http::trace::TraceLayer;
-use tpex::{Action, ActionLevel};
-use tracing::{info_span, warn_span};
+use tpex::{Action, ActionLevel, StateSync};
 use std::io::Write;
 use tracing_subscriber::EnvFilter;
 
@@ -51,7 +50,8 @@ enum Error {
     TPEx(tpex::Error),
     UncontrolledUser,
     TokenTooLowLevel,
-    TokenInvalid
+    TokenInvalid,
+    NotNextId{next_id: u64}
 }
 impl From<tpex::Error> for Error {
     fn from(value: tpex::Error) -> Self {
@@ -64,6 +64,7 @@ impl axum::response::IntoResponse for Error {
             Self::TPEx(err) => (409, ErrorInfo{error:err.to_string()}),
             Self::UncontrolledUser => (403, ErrorInfo{error:"This action would act on behalf of a different user.".to_owned()}),
             Self::TokenTooLowLevel => (403, ErrorInfo{error:"This action requires a higher permission level".to_owned()}),
+            Self::NotNextId{next_id} => (409, ErrorInfo{error:format!("The requested ID was not the next, which is {next_id}")}),
             Self::TokenInvalid => (409, ErrorInfo{error:"The given token does not exist".to_owned()})
         };
 
@@ -82,6 +83,7 @@ impl axum::response::IntoResponse for Error {
 async fn state_patch(
     axum::extract::State(state): axum::extract::State<State>,
     token: TokenInfo,
+    axum_extra::extract::OptionalQuery(args): axum_extra::extract::OptionalQuery<StatePatchArgs>,
     axum::extract::Json(action): axum::extract::Json<tpex::Action>
 ) -> Result<axum::response::Json<u64>, Error> {
     match token.level {
@@ -98,8 +100,20 @@ async fn state_patch(
         // Apply catches all banker perm mismatches, assuming that upstream has verified their action:
         TokenLevel::ProxyAll => ()
     }
-    let id = state.tpex.write().await.apply(action).await?;
-    Ok(axum::Json(id))
+    let mut state = state.tpex.write().await;
+    if let Some(expected_id) = args.and_then(|i| i.id) {
+        let next_id = state.state.get_next_id();
+        if next_id != expected_id {
+            return Err(Error::NotNextId{next_id});
+        }
+        let id = state.apply(action).await?;
+        assert_eq!(id, next_id, "Somehow got ID mismatch");
+        Ok(axum::Json(id))
+    }
+    else {
+        let id = state.apply(action).await?;
+        Ok(axum::Json(id))
+    }
 }
 
 async fn state_get(
@@ -167,6 +181,14 @@ async fn token_delete(
     state.tokens.delete_token(&token.token).await
     .map_or(Err(Error::TokenInvalid), |_| Ok(axum::Json(())))
 }
+
+async fn fastsync_get(
+    axum::extract::State(state): axum::extract::State<State>,
+    _token: TokenInfo
+) -> axum::Json<StateSync> {
+    let res = StateSync::from(&state.tpex.read().await.state);
+    axum::Json(res)
+}
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -211,6 +233,7 @@ async fn main() {
         .allow_origin(tower_http::cors::Any)
         .allow_methods(tower_http::cors::Any);
 
+
     let app = Router::new()
         .route("/state", axum::routing::get(state_get))
         .route("/state", axum::routing::patch(state_patch))
@@ -218,6 +241,8 @@ async fn main() {
         .route("/token", axum::routing::get(token_get))
         .route("/token", axum::routing::post(token_post))
         .route("/token", axum::routing::delete(token_delete))
+
+        .route("/fastsync", axum::routing::get(fastsync_get))
 
         .with_state(std::sync::Arc::new(state))
 

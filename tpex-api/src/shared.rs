@@ -126,6 +126,11 @@ pub struct StateGetArgs {
     pub from: Option<u64>
 }
 
+#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct StatePatchArgs {
+    pub id: Option<u64>
+}
 #[derive(Default, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ErrorInfo {
