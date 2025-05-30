@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AssetId, Error, PlayerId, Result};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct AuthSync {
     /// The restricted assets
     pub restricted: std::collections::HashSet<AssetId>,
@@ -19,6 +19,17 @@ impl From<&AuthTracker> for AuthSync {
             bankers: value.bankers.clone(),
             authorisations: value.authorisations.clone(),
         }
+    }
+}
+impl TryFrom<AuthSync> for AuthTracker {
+    type Error = Error;
+
+    fn try_from(value: AuthSync) -> Result<AuthTracker> {
+        Ok(AuthTracker {
+            restricted: value.restricted,
+            bankers: value.bankers,
+            authorisations: value.authorisations
+        })
     }
 }
 

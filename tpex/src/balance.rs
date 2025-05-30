@@ -4,7 +4,7 @@ use crate::Coins;
 
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct BalanceSync {
     pub balances: std::collections::HashMap<PlayerId, Coins>,
     pub assets: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
@@ -24,7 +24,7 @@ impl TryFrom<BalanceSync> for BalanceTracker {
                 .try_fold(std::collections::HashMap::default(), |mut acc, assets| {
                     for (asset_name, asset_count) in assets {
                         let tgt: &mut u64 = acc.entry(asset_name.clone()).or_default();
-                        *tgt = tgt.checked_add(*asset_count).ok_or(Error::Overflow)?;
+                        *tgt = tgt.checked_add(*asset_count).ok_or(Error::InvalidFastSync)?;
                     }
                     Ok(acc)
                 })?

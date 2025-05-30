@@ -588,6 +588,15 @@ async fn lifecycle() {
     ).await;
 
 
+
+    let ser: StateSync = (&state.state).into();
+    println!("State: {:?}", state.state);
+    println!("Serialised state: {ser:?}");
+    let deser: State = ser.clone().try_into().expect("Could not deserialise state sync");
+    let deser_ser: StateSync = (&deser).into();
+    assert_eq!(ser, deser_ser, "FastSync mismatch");
+
+
     // let (state, mut source) = {
     //     let tmp = state.state.clone();
     //     let x = state.sink.clone();

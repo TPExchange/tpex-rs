@@ -1,10 +1,125 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::Coins;
 
 use super::{AssetId, Audit, Auditable, Error, PlayerId};
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingSync {
+    pub id: u64,
+    pub player: PlayerId,
+    pub amount_remaining: u64,
+    pub fee_ppm: u64
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrderSync {
+    pub buy_orders: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, Vec<PendingSync>>>,
+    pub sell_orders: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, Vec<PendingSync>>>,
+}
+
+impl TryInto<OrderTracker> for OrderSync {
+    type Error = Error;
+    fn try_into(self) -> Result<OrderTracker, Error> {
+        let mut current_audit = Audit::default();
+        let mut orders: std::collections::BTreeMap<u64, PendingOrder> = Default::default();
+        let mut best_buy: std::collections::HashMap<String, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>> = Default::default();
+        let mut best_sell: std::collections::HashMap<String, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>> = Default::default();
+        for (asset, levels) in self.buy_orders {
+            let entry = best_buy.entry(asset.clone()).or_default();
+            for (coins_per, pending) in levels {
+                let mut data = std::collections::VecDeque::with_capacity(pending.len());
+
+                // If it already exists, we have an error
+                for i in pending {
+                    data.push_back(i.id);
+                    if orders.insert(i.id, PendingOrder {
+                        id: i.id,
+                        coins_per,
+                        player: i.player,
+                        amount_remaining: i.amount_remaining,
+                        asset: asset.clone(),
+                        order_type: OrderType::Buy,
+                        fee_ppm: i.fee_ppm,
+                    }).is_some() { return Err(Error::InvalidFastSync); }
+                    // Buy orders lock up coins
+                    current_audit.add_coins(
+                        // The fee + the total amount is 1 mil + fee (i.e. 1 + fee/1e6)
+                        coins_per.fee_ppm(i.fee_ppm.checked_add(1_000_000).ok_or(Error::InvalidFastSync)?)?.checked_mul(i.amount_remaining)?
+                    );
+                }
+                if entry.insert(coins_per, data).is_some() {
+                    return Err(Error::InvalidFastSync);
+                }
+            }
+        }
+
+        for (asset, levels) in self.sell_orders {
+            let entry = best_sell.entry(asset.clone()).or_default();
+            for (coins_per, pending) in levels {
+                let mut data = std::collections::VecDeque::with_capacity(pending.len());
+
+                // If it already exists, we have an error
+                for i in pending {
+                    data.push_back(i.id);
+                    if orders.insert(i.id, PendingOrder {
+                        id: i.id,
+                        coins_per,
+                        player: i.player,
+                        amount_remaining: i.amount_remaining,
+                        asset: asset.clone(),
+                        order_type: OrderType::Sell,
+                        fee_ppm: i.fee_ppm,
+                    }).is_some() { return Err(Error::InvalidFastSync); }
+                    // Sell orders lock up items
+                    current_audit.add_asset(asset.clone(), i.amount_remaining);
+                }
+                if entry.insert(coins_per, data).is_some() {
+                    return Err(Error::InvalidFastSync);
+                }
+            }
+        }
+        Ok(OrderTracker {
+            orders,
+            best_buy,
+            best_sell,
+            current_audit
+        })
+    }
+}
+
+impl From<&OrderTracker> for OrderSync {
+    fn from(val: &OrderTracker) -> Self {
+        OrderSync {
+            buy_orders:
+                val.best_buy.iter()
+                .map(|(asset, levels)| {
+                    (asset.clone(), levels.iter().map(|(coins_per, pending)| {
+                        (*coins_per, pending.iter().filter_map(|i| val.orders.get(i)).map(|i| PendingSync {
+                            id: i.id,
+                            player: i.player.clone(),
+                            amount_remaining: i.amount_remaining,
+                            fee_ppm: i.fee_ppm,
+                        }).collect())
+                    }).collect())
+                }).collect(),
+            sell_orders:
+                val.best_sell.iter()
+                .map(|(asset, levels)| {
+                    (asset.clone(), levels.iter().map(|(coins_per, pending)| {
+                        (*coins_per, pending.iter().filter_map(|i| val.orders.get(i)).map(|i| PendingSync {
+                            id: i.id,
+                            player: i.player.clone(),
+                            amount_remaining: i.amount_remaining,
+                            fee_ppm: i.fee_ppm,
+                        }).collect())
+                    }).collect())
+                }).collect()
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum OrderType {
     Buy,
     Sell
@@ -18,7 +133,7 @@ impl std::fmt::Display for OrderType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct PendingOrder {
     pub id: u64,
     pub coins_per: Coins,

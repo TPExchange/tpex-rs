@@ -2,11 +2,12 @@ use std::{collections::HashSet, ops::{Add, AddAssign}};
 
 use auth::AuthSync;
 use balance::BalanceSync;
-use investment::InvestmentSync;
+use order::OrderSync;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 // We use a base coins, which represent 1/1000 of a diamond
 use serde::{Deserialize, Serialize};
+use withdrawal::WithdrawalSync;
 
 pub use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
@@ -367,7 +368,8 @@ pub enum Error {
     NotABanker{player: PlayerId},
     CoinStringMangled,
     CoinStringTooPrecise,
-    InvalidRates
+    InvalidRates,
+    InvalidFastSync
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -417,6 +419,9 @@ impl std::fmt::Display for Error {
             },
             Error::InvalidRates => {
                 write!(f, "The provided rates were invalid")
+            },
+            Error::InvalidFastSync => {
+                write!(f, "The provided FastSync struct was corrupted")
             }
         }
 
@@ -452,11 +457,12 @@ impl BankRates {
     }
 }
 
+static DEFAULT_ASSET_INFO: std::sync::LazyLock<std::collections::HashMap<AssetId, AssetInfo>> = std::sync::LazyLock::new(|| serde_json::from_str(include_str!("../resources/assets.json")).expect("Could not parse asset_info"));
+
 #[derive(Debug, Clone)]
 pub struct State {
     next_id: u64,
     rates: BankRates,
-    earnings: std::collections::HashMap<PlayerId, Coins>,
 
     asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     auth: auth::AuthTracker,
@@ -467,10 +473,10 @@ pub struct State {
 }
 impl Default for State {
     fn default() -> State {
-        let asset_info = serde_json::from_str(include_str!("../resources/assets.json")).expect("Could not parse asset_info");
+        let asset_info = DEFAULT_ASSET_INFO.clone();
         State {
             rates: INITIAL_BANK_RATES,
-            earnings: Default::default(),
+            // earnings: Default::default(),
             // Start on ID 1 for nice mapping to line numbers
             next_id: 1,
             auth: Default::default(),
@@ -657,8 +663,6 @@ impl State {
                 self.check_banker(&banker)?;
                 // Try to take out the pending transaction
                 let res = self.withdrawal.complete(target)?;
-                // Mark who delivered
-                self.earnings.entry(banker).or_default().checked_add_assign(res.total_fee).expect("Withdrawal earnings overflow");
                 // Add the profit
                 self.balance.commit_coin_add(&PlayerId::the_bank(), res.total_fee);
                 Ok(())
@@ -871,13 +875,15 @@ impl Auditable for State {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct StateSync {
     pub next_id: u64,
     pub balances: BalanceSync,
     pub rates: BankRates,
     pub auth: AuthSync,
-    pub investment: InvestmentSync
+    // pub investment: InvestmentSync,
+    pub order: OrderSync,
+    pub withdrawal: WithdrawalSync
 }
 impl From<&State> for StateSync {
     fn from(value: &State) -> Self {
@@ -886,7 +892,9 @@ impl From<&State> for StateSync {
             balances: (&value.balance).into(),
             rates: value.rates.clone(),
             auth: (&value.auth).into(),
-            investment: (&value.investment).into(),
+            // investment: (&value.investment).into(),
+            order: (&value.order).into(),
+            withdrawal: (&value.withdrawal).into(),
         }
     }
 }
@@ -897,12 +905,11 @@ impl TryFrom<StateSync> for State {
             next_id: value.next_id,
             rates: value.rates,
             balance: value.balances.try_into()?,
-            investment: value.investment.try_into()?,
-            asset_info: todo!(),
-            earnings: todo!(),
-            order: todo!(),
-            withdrawal: todo!(),
-            auth: todo!(),
+            investment: Default::default(), //value.investment.try_into()?,
+            asset_info: DEFAULT_ASSET_INFO.clone(),
+            order: value.order.try_into()?,
+            withdrawal: value.withdrawal.try_into()?,
+            auth: value.auth.try_into()?,
         })
     }
 }

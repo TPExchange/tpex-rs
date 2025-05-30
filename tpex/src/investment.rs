@@ -4,7 +4,7 @@ use crate::Coins;
 
 use super::{AssetId, Audit, Auditable, PlayerId, Error};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct InvestmentSync {
     pub investables: std::collections::HashSet<AssetId>,
     pub investments: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
@@ -29,7 +29,22 @@ impl TryFrom<InvestmentSync> for InvestmentTracker {
                 target.insert(player.clone(), *count);
             }
         }
-        todo!()
+        let amount_invested:std::collections::HashMap<String, u64> =
+            asset_investments.iter()
+            .map(|(asset, player_investments)| Ok((
+                asset.clone(),
+                player_investments.values().try_fold(0u64, |acc, i| acc.checked_add(*i)).ok_or(Error::InvalidFastSync)?
+            )))
+            .collect::<Result<std::collections::HashMap<String, u64>, Error>>()?;
+        Ok(InvestmentTracker {
+            current_audit: Audit { coins: Coins::default(), assets: amount_invested.clone() },
+            investables: value.investables,
+            asset_investments,
+            player_investments: value.investments,
+            amount_invested,
+            investment_busy: todo!(),
+            investment_confirmed: todo!(),
+        })
         // let mut amount_invested: std::collections::HashMap<AssetId, u64> =
         //     asset_investments.iter().map(|(i, j)| (i, j.keys().try_fold()))
         // Ok(InvestmentTracker {
