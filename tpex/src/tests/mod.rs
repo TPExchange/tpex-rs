@@ -511,6 +511,35 @@ async fn lifecycle() {
     ));
     println!("Post buy 2:\n{}", pretty_orders(&state.state));
 
+    println!("Buy order 3:");
+    let cancel_me = state.assert_state(
+        Action::BuyOrder {
+            player: player(3),
+            asset: item.clone(),
+            count: 1,
+            coins_per: Coins::from_millicoins(1)
+        },
+        ExpectedState {
+            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 64), (player(3), item.clone(), 96)],
+            buy_cost: vec![(player(3), Coins::from_millicoins(1))],
+            unfulfilled: vec![(player(3), Coins::from_millicoins(1))],
+            ..Default::default()
+        }
+    ).await.unwrap();
+    println!("Post buy 3:\n{}", pretty_orders(&state.state));
+
+    println!("Cancel buy order 3:");
+    state.assert_state(
+        Action::CancelOrder {
+            target: cancel_me
+        },
+        ExpectedState {
+            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 64), (player(3), item.clone(), 96)],
+            coins_appeared: vec![(player(3), Coins::from_millicoins(1).fee_ppm(state.state.rates.buy_order_ppm + 1_000_000).unwrap())],
+            ..Default::default()
+        }
+    ).await;
+
     println!("Sell order 8:");
     state.assert_state(
         Action::SellOrder {

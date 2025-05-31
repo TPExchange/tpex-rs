@@ -441,7 +441,10 @@ impl OrderTracker {
             match found.order_type {
                 // If we found it as a buy...
                 OrderType::Buy => {
-                    let refund_coins = found.coins_per.checked_mul(found.amount_remaining).expect("Order cancel refund overflow");
+                    let refund_coins =
+                        found.coins_per.checked_mul(found.amount_remaining).expect("Order cancel refund overflow")
+                        // refund the fee too
+                        .fee_ppm(1_000_000_u64.checked_add(found.fee_ppm).expect("Order cancel fee overflow")).expect("Order cancel fee overflow");
                     // ... we are no longer responsible for the refunded coins ...
                     self.current_audit.sub_coins(refund_coins);
                     // ... and refund the money ...
