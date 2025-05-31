@@ -136,3 +136,8 @@ pub struct StatePatchArgs {
 pub struct ErrorInfo {
     pub error: String
 }
+#[derive(Default, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PollGetArgs {
+    pub id: u64
+}

@@ -41,7 +41,8 @@ impl TPExState {
 
 struct StateStruct {
     tpex: tokio::sync::RwLock<TPExState>,
-    tokens: tokens::TokenHandler
+    tokens: tokens::TokenHandler,
+    updated: tokio::sync::watch::Sender<u64>,
 }
 type State = std::sync::Arc<StateStruct>;
 
@@ -100,20 +101,25 @@ async fn state_patch(
         // Apply catches all banker perm mismatches, assuming that upstream has verified their action:
         TokenLevel::ProxyAll => ()
     }
-    let mut state = state.tpex.write().await;
-    if let Some(expected_id) = args.and_then(|i| i.id) {
-        let next_id = state.state.get_next_id();
-        if next_id != expected_id {
-            return Err(Error::NotNextId{next_id});
+    let mut tpex_state = state.tpex.write().await;
+    let id =
+        if let Some(expected_id) = args.and_then(|i| i.id) {
+            let next_id = tpex_state.state.get_next_id();
+            if next_id != expected_id {
+                return Err(Error::NotNextId{next_id});
+            }
+            let id = tpex_state.apply(action).await?;
+            assert_eq!(id, next_id, "Somehow got ID mismatch");
+            id
         }
-        let id = state.apply(action).await?;
-        assert_eq!(id, next_id, "Somehow got ID mismatch");
-        Ok(axum::Json(id))
-    }
-    else {
-        let id = state.apply(action).await?;
-        Ok(axum::Json(id))
-    }
+        else {
+            tpex_state.apply(action).await?
+        };
+    // We patched, so update the id
+    //
+    // We use send_replace so that we don't have to worry about if anyone's listening
+    state.updated.send_replace(id);
+    Ok(axum::Json(id))
 }
 
 async fn state_get(
@@ -189,6 +195,30 @@ async fn fastsync_get(
     let res = StateSync::from(&state.tpex.read().await.state);
     axum::Json(res)
 }
+
+async fn poll_get(
+    axum::extract::State(state): axum::extract::State<State>,
+    _token: TokenInfo,
+    upgrade: axum::extract::ws::WebSocketUpgrade
+) -> axum::response::Response {
+    upgrade.on_upgrade(move |mut sock: axum::extract::ws::WebSocket| async move {
+        while let Some(Ok(id)) = sock.recv().await {
+            let axum::extract::ws::Message::Text(data) = id
+            else { break; };
+
+            let Some(id): Option<u64> = serde_json::from_slice(data.as_bytes()).ok()
+            else { break; };
+
+            let new_id = *state.updated.subscribe().wait_for(|i| *i >= id).await.expect("Failed to poll updated_recv");
+
+            if sock.send(axum::extract::ws::Message::Text(serde_json::to_string(&new_id).expect("Could not serialise new id").into())).await.is_err() {
+                break;
+            }
+        }
+        let _ = sock.send(axum::extract::ws::Message::Close(None)).await;
+    })
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -223,9 +253,11 @@ async fn main() {
 
     let token_handler = tokens::TokenHandler::new(&args.db).await.expect("Could not connect to DB");
 
+    let (updated, _) = tokio::sync::watch::channel(tpex_state.get_next_id().checked_sub(1).expect("Poll counter underflow"));
     let state = StateStruct {
         tpex: tokio::sync::RwLock::new(TPExState { state: tpex_state, file: trade_file }),
-        tokens: token_handler
+        tokens: token_handler,
+        updated
     };
 
     let cors = tower_http::cors::CorsLayer::new()
@@ -243,6 +275,8 @@ async fn main() {
         .route("/token", axum::routing::delete(token_delete))
 
         .route("/fastsync", axum::routing::get(fastsync_get))
+
+        .route("/poll", axum::routing::get(poll_get))
 
         .with_state(std::sync::Arc::new(state))
 
