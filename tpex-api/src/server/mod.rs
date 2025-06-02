@@ -123,22 +123,26 @@ async fn state_get(
         upgrade.on_upgrade(move |mut sock: axum::extract::ws::WebSocket| async move {
             let mut subscription = state.updated.subscribe();
             loop {
-                let new_id = *subscription.wait_for(|i| *i >= from).await.expect("Failed to poll updated_recv");
+                subscription.wait_for(|i| *i >= from).await.expect("Failed to poll updated_recv");
+
+                let tpex_state_handle = state.tpex.read().await;
                 // It's better to clone these out than hold state
                 let res =
-                    state.tpex.read().await.cache().iter()
+                    tpex_state_handle.cache().iter()
                     .skip(from as usize)
                     .map(Into::into)
                     .map(axum::extract::ws::Message::Text)
                     .collect::<Vec<_>>();
-
+                // rechecking the id prevents a race condition
+                from = tpex_state_handle.state().get_next_id() - 1;
+                // We have extracted all we need
+                drop(tpex_state_handle);
+                // Send it off
                 for i in res {
                     if sock.send(i).await.is_err() {
                         break;
                     }
                 }
-
-                from = new_id;
             }
         })
     }

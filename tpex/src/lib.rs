@@ -877,7 +877,7 @@ impl Auditable for State {
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct StateSync {
-    pub next_id: u64,
+    pub current_id: u64,
     pub balances: BalanceSync,
     pub rates: BankRates,
     pub auth: AuthSync,
@@ -888,7 +888,7 @@ pub struct StateSync {
 impl From<&State> for StateSync {
     fn from(value: &State) -> Self {
         Self {
-            next_id: value.next_id,
+            current_id: value.next_id.checked_sub(1).unwrap(),
             balances: (&value.balance).into(),
             rates: value.rates.clone(),
             auth: (&value.auth).into(),
@@ -902,7 +902,7 @@ impl TryFrom<StateSync> for State {
     type Error = Error;
     fn try_from(value: StateSync) -> Result<Self> {
         Ok(Self {
-            next_id: value.next_id,
+            next_id: value.current_id.checked_add(1).ok_or(Error::Overflow)?,
             rates: value.rates,
             balance: value.balances.try_into()?,
             investment: Default::default(), //value.investment.try_into()?,

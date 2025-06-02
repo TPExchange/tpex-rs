@@ -1,7 +1,7 @@
 name: Build tpex-capi
 
 on:
-  workflow_run:
+  workflow_run: 
     workflows: ["Run unit tests"]
     # Include tags
     branches: ["master", 'v*.*.*']
@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: rust
+    runs-on: ubuntu-latest
     outputs:
       release_built: ${{ steps.set-output.outputs.release_built }}
     steps:

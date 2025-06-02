@@ -117,6 +117,12 @@ async fn stream_state() {
             count: 3,
             banker: PlayerId::the_bank()
         },
+        tpex::Action::Deposit {
+            player: PlayerId::assume_username_correct("test".to_owned()),
+            asset: AssetId::from("cobblestone"),
+            count: 4,
+            banker: PlayerId::the_bank()
+        },
     ];
     let actions_copy = actions.clone();
     tokio::spawn(async move {
@@ -129,6 +135,8 @@ async fn stream_state() {
     assert_eq!(wrapped.action, actions[1]);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.action, actions[2]);
+    let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
+    assert_eq!(wrapped.action, actions[3]);
 }
 
 #[tokio::test]
@@ -167,7 +175,7 @@ async fn stream_fastsync() {
     let mut count = 0;
     let wrapped = loop {
         let res = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
-        if res.next_id == 4 { break res; }
+        if res.current_id == 3 { break res; }
         // Make sure that we're not being spammed
         count += 1;
         if count > 4 {
