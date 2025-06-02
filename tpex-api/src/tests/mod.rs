@@ -168,7 +168,11 @@ async fn stream_fastsync() {
     let wrapped = loop {
         let res = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
         if res.next_id == 4 { break res; }
+        // Make sure that we're not being spammed
+        count += 1;
+        if count > 4 {
+            panic!("Too many loops");
+        }
     };
-    panic!();
     assert_eq!(wrapped.balances.assets[&PlayerId::assume_username_correct("test".to_owned())][&AssetId::from("cobblestone")], 6);
 }

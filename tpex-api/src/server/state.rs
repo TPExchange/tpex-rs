@@ -52,7 +52,7 @@ impl<Stream: tokio::io::AsyncSeek + tokio::io::AsyncWrite + tokio::io::AsyncRead
     pub async fn apply(&mut self, action: Action) -> Result<u64, tpex::Error> {
         let mut stream = CachedFileView::new(&mut self.file);
         let ret = self.state.apply(action, &mut stream).await?;
-        self.cache.push(stream.extract().try_into().expect("Produced non-utf8 log line"));
+        self.cache.push(String::from_utf8(stream.extract()).expect("Produced non-utf8 log line"));
         Ok(ret)
     }
 
