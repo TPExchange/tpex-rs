@@ -1,15 +1,18 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use axum::{http::StatusCode};
 use axum_extra::headers::{authorization::Bearer, Authorization, HeaderMapExt};
 use num_traits::FromPrimitive;
+use tokio::io::{AsyncBufRead, AsyncSeek, AsyncWrite};
 use tpex::PlayerId;
 use crate::shared::*;
 
-impl axum::extract::FromRequestParts<super::State> for TokenInfo {
+use super::state::StateStruct;
+
+impl<T: AsyncBufRead + AsyncWrite + AsyncSeek + Unpin + Send + Sync> axum::extract::FromRequestParts<Arc<StateStruct<T>>> for TokenInfo {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &super::State) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &Arc<StateStruct<T>>) -> Result<Self, Self::Rejection> {
             let Some(auth) : Option<Authorization<Bearer>> = parts.headers.typed_get()
             else { return Err(StatusCode::UNAUTHORIZED); };
 
@@ -20,7 +23,7 @@ impl axum::extract::FromRequestParts<super::State> for TokenInfo {
             else { return Err(StatusCode::UNAUTHORIZED); };
 
             // If the token would need banker perms to make, check that the user is still at that level
-            if token_info.level > TokenLevel::ProxyOne && !state.tpex.read().await.state.is_banker(&token_info.user) {
+            if token_info.level > TokenLevel::ProxyOne && !state.tpex.read().await.state().is_banker(&token_info.user) {
                 return Err(StatusCode::UNAUTHORIZED)
             }
 
@@ -33,6 +36,7 @@ pub struct TokenHandler {
 }
 impl TokenHandler {
     pub async fn new(url: &str) -> sqlx::Result<TokenHandler> {
+        sqlx::any::install_default_drivers();
         let opt = sqlx::sqlite::SqliteConnectOptions::from_str(url)?.create_if_missing(true);
         let ret = TokenHandler{
             pool: sqlx::SqlitePool::connect_with(opt).await?

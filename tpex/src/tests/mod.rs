@@ -539,6 +539,7 @@ async fn lifecycle() {
             ..Default::default()
         }
     ).await;
+    println!("Post cancel 3:\n{}", pretty_orders(&state.state));
 
     println!("Sell order 8:");
     state.assert_state(

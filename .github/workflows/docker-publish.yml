@@ -5,7 +5,7 @@ name: Create and publish a Docker image
 on:
   schedule:
     - cron: '23 7 * * *'
-  workflow_run: 
+  workflow_run:
     workflows: ["Run unit tests"]
     # Include tags
     branches: ["master", 'v*.*.*']

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::{Add, AddAssign}};
+use std::{collections::HashSet, ops::{Add, AddAssign}, pin::pin};
 
 use auth::AuthSync;
 use balance::BalanceSync;
@@ -332,16 +332,16 @@ pub trait Auditable {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct WrappedAction {
     // The id of the action, which should equal the line number of the trades list
-    id: u64,
+    pub id: u64,
     // The time this action was performed
-    time: chrono::DateTime<chrono::Utc>,
+    pub time: chrono::DateTime<chrono::Utc>,
     // The action itself
-    action: Action,
+    pub action: Action,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct AssetInfo {
-    stack_size: u64
+    pub stack_size: u64
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -810,9 +810,8 @@ impl State {
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
-    pub async fn replay(&mut self, trade_file: &mut (impl tokio::io::AsyncRead + std::marker::Unpin), hard_audit: bool) -> Result<()> {
-        let trade_file_reader = tokio::io::BufReader::new(trade_file);
-        let mut trade_file_lines = trade_file_reader.lines();
+    pub async fn replay(&mut self, trade_file: &mut (impl tokio::io::AsyncBufRead + std::marker::Unpin), hard_audit: bool) -> Result<()> {
+        let mut trade_file_lines = trade_file.lines();
         macro_rules! do_audit {
             () => {
                 if hard_audit { self.hard_audit() } else { self.soft_audit() }
@@ -841,7 +840,7 @@ impl State {
         Ok(())
     }
     /// Atomically try to apply an action, and if successful, write to given stream
-    pub async fn apply(&mut self, action: Action, out: &mut (impl tokio::io::AsyncWrite + std::marker::Unpin)) -> Result<u64> {
+    pub async fn apply(&mut self, action: Action, mut out: impl tokio::io::AsyncWrite) -> Result<u64> {
         let id = self.next_id;
         let wrapped_action = WrappedAction {
             id,
@@ -860,6 +859,7 @@ impl State {
         }
         line.push('\n');
         self.next_id += 1;
+        let mut out = pin!(out);
         out.write_all(line.as_bytes()).await.expect("Could not write to log, must immediately stop!");
         out.flush().await.expect("Could not flush to log, must immediately stop!");
         Ok(id)

@@ -5,7 +5,7 @@ async fn main() {
         println!("TPEx validator requires a single argument: the path to the trade list");
         return;
     }
-    let mut txlog = tokio::fs::OpenOptions::new().read(true).open(&argv[1]).await.expect("Could not open txlog");
+    let mut txlog = tokio::io::BufReader::new(tokio::fs::OpenOptions::new().read(true).open(&argv[1]).await.expect("Could not open txlog"));
 
     let mut state = tpex::State::default();
     if let Err(e) = state.replay(&mut txlog, true).await {

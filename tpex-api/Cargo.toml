@@ -20,26 +20,30 @@ getrandom = { version = "^0.3", optional = true }
 serde_json = { version = "^1.0.114", optional = true }
 clap = { version = "^4.5.4", features = ["derive"], optional = true }
 tower-http = { version = "^0.6", features = ["cors", "trace"], optional = true}
-tracing-subscriber = { version = "^0.3", features=["env-filter"], optional=true }
-tracing = { version = "^0.1.41", optional=true }
+tracing-subscriber = { version = "^0.3", features=["env-filter"], optional = true }
+tracing = { version = "^0.1.41", optional = true }
+tokio-util = { version = "^0.7.13", optional = true}
 
-reqwest = {version = "^0.12", default-features = false, features = ["json"], optional = true}
+reqwest = { version = "^0.12", default-features = false, features = ["json"], optional = true }
+futures = { version = "^0.3.0", optional = true }
+reqwest-websocket = { version = "^0.5.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "^1.45.0", features = ["test-util"] }
 axum = { version = "^0.8.4", features = ["macros"] }
+tempfile = { version = "^3.0.0" }
 
 [features]
-server = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json", "dep:clap", "dep:tower-http", "dep:tracing-subscriber", "dep:tracing"]
-client = ["dep:reqwest"]
+server = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:serde_json", "dep:clap", "dep:tower-http", "dep:tracing-subscriber", "dep:tracing", "dep:tokio-util"]
+client = ["dep:reqwest", "dep:reqwest-websocket", "dep:futures"]
 default = ["server", "client"]
 
 [[bin]]
 name = "tpex-srv"
-path = "src/server.rs"
+path = "src/bin.rs"
 required-features = ["server"]
 
 [lib]
 name = "tpex_api"
-path = "src/client.rs"
+path = "src/lib.rs"
 required-features = ["client"]

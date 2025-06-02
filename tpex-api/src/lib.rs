@@ -3,6 +3,12 @@
 mod tests;
 mod shared;
 
+#[cfg(feature="server")]
+pub mod server;
+
+use futures::StreamExt;
+use reqwest::StatusCode;
+use reqwest_websocket::{Message, RequestBuilderExt};
 pub use shared::*;
 use tpex::{AssetId, AssetInfo, State, StateSync};
 
@@ -11,19 +17,27 @@ pub use shared::Token;
 #[derive(Debug)]
 pub enum Error {
     RequestFailure(reqwest::Error),
+    WebSocketFailure(reqwest_websocket::Error),
     TPExFailure(ErrorInfo),
+    Unknown(Option<StatusCode>)
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::RequestFailure(err) => write!(f, "Request failure: {err}"),
-            Error::TPExFailure(err) => write!(f, "TPEx failure: {}", err.error)
+            Error::WebSocketFailure(err) => write!(f, "WebSocket failure: {err}"),
+            Error::TPExFailure(err) => write!(f, "TPEx failure: {}", err.error),
+            Error::Unknown(Some(code)) => write!(f, "Unknown failure with status code {code}"),
+            Error::Unknown(None) => write!(f, "Unknown failutre"),
         }
     }
 }
 impl std::error::Error for Error {}
 impl From<reqwest::Error> for Error {
     fn from(value: reqwest::Error) -> Self { Error::RequestFailure(value) }
+}
+impl From<reqwest_websocket::Error> for Error {
+    fn from(value: reqwest_websocket::Error) -> Self { Error::WebSocketFailure(value) }
 }
 impl From<ErrorInfo> for Error {
     fn from(value: ErrorInfo) -> Self { Error::TPExFailure(value) }
@@ -51,8 +65,14 @@ impl Remote {
         }
     }
     async fn check_response(response: reqwest::Response) -> Result<reqwest::Response> {
-        if response.status().is_success() { Ok(response) }
-        else { Err(Error::TPExFailure(response.json().await.expect("Invalid error json"))) }
+        let status = response.status();
+        if status.is_success() { Ok(response) }
+        else if let Ok(err) = response.json().await {
+            Err(Error::TPExFailure(err))
+        }
+        else {
+            Err(Error::Unknown(Some(status)))
+        }
     }
 
     pub async fn get_state(&self, from: u64) -> Result<Vec<u8>> {
@@ -61,6 +81,26 @@ impl Remote {
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.bytes().await?.to_vec())
+    }
+    pub async fn stream_state(&self, from: u64) -> Result<impl futures::Stream<Item=Result<tpex::WrappedAction>>> {
+        let mut target = self.endpoint.clone();
+        target.query_pairs_mut().append_pair("from", &from.to_string());
+        target.path_segments_mut().expect("Unable to nav to /state").push("state");
+
+        let ws = self.client.get(target)
+            .upgrade()
+            .send().await?
+            .into_websocket().await?;
+
+        Ok(ws.filter_map(|msg| async {
+            let ret: Option<Result<tpex::WrappedAction>> = match msg {
+                Ok(Message::Text(text)) => Some(serde_json::from_str(&text).map_err(|_| Error::Unknown(None))),
+                Ok(Message::Binary(binary)) => Some(serde_json::from_slice(&binary).map_err(|_| Error::Unknown(None))),
+                Err(e) => Some(Err(e.into())),
+                _ => None
+            };
+            ret
+        }))
     }
     pub async fn apply(&self, action: &tpex::Action) -> Result<u64> {
         let mut target = self.endpoint.clone();
@@ -88,9 +128,28 @@ impl Remote {
     }
     pub async fn fastsync(&self) -> Result<StateSync> {
         let mut target = self.endpoint.clone();
-        target.path_segments_mut().expect("Unable to nav to /token").push("fastsync");
+        target.path_segments_mut().expect("Unable to nav to /fastsync").push("fastsync");
 
-        Ok(Self::check_response(self.client.post(target).send().await?).await?.json().await?)
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
+    }
+    pub async fn stream_fastsync(&self) -> Result<impl futures::Stream<Item=Result<tpex::StateSync>>> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /fastsync").push("fastsync");
+
+        let ws = self.client.get(target)
+            .upgrade()
+            .send().await?
+            .into_websocket().await?;
+
+        Ok(ws.filter_map(|msg| async {
+            let ret: Option<Result<tpex::StateSync>> = match msg {
+                Ok(Message::Text(text)) => Some(serde_json::from_str(&text).map_err(|_| Error::Unknown(None))),
+                Ok(Message::Binary(binary)) => Some(serde_json::from_slice(&binary).map_err(|_| Error::Unknown(None))),
+                Err(e) => Some(Err(e.into())),
+                _ => None
+            };
+            ret
+        }))
     }
 }
 
