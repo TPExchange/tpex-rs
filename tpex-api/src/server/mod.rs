@@ -231,7 +231,8 @@ pub async fn run_server<L: Listener>(
     let mut cache = Vec::new();
     {
         let mut lines = trade_log.lines();
-        while let Some(line) = lines.next_line().await.expect("Could not read trade file") {
+        while let Some(mut line) = lines.next_line().await.expect("Could not read trade file") {
+            line.push('\n');
             cache.push(line);
         }
         trade_log = lines.into_inner();

@@ -721,3 +721,19 @@ async fn transfer_asset() {
         }
     ).await;
 }
+
+// After nasty bug that caused reloads to not have newlines
+#[tokio::test]
+async fn reload_state() {
+    let mut state = State::new();
+    let mut log = Vec::new();
+    for i in [
+        Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 1, banker: PlayerId::the_bank() },
+        Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 2, banker: PlayerId::the_bank() },
+        Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 3, banker: PlayerId::the_bank() },
+    ] { state.apply(i, &mut log).await.expect("Failed to apply action"); }
+
+    let mut loaded_state = State::new();
+    loaded_state.replay(&mut log.as_ref(), true).await.expect("Failed to replay saved state");
+    assert_eq!(StateSync::from(&loaded_state), StateSync::from(&state));
+}

@@ -9,6 +9,8 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{server::{self, tokens::TokenHandler}, Remote, Token, TokenLevel};
 
+fn player(n: u64) -> PlayerId { PlayerId::assume_username_correct(n.to_string()) }
+
 struct RunningServer {
     cancel: DropGuard,
     // We need this as a handle
@@ -19,7 +21,7 @@ struct RunningServer {
     pub token: Token,
 }
 impl RunningServer {
-    async fn start_server() -> RunningServer {
+    async fn start_server_with_log(log: impl Into<Vec<u8>>) -> RunningServer {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::try_new("trace").unwrap())
             .try_init();
@@ -29,7 +31,7 @@ impl RunningServer {
         let mut database = tempfile::NamedTempFile::new().expect("Could not make database tempfile");
         database.write_all(include_bytes!("test.db")).expect("Failed to write out db");
         database.flush().expect("Failed to flush db");
-        let trade_log = tokio::io::BufStream::new(std::io::Cursor::new(Vec::new()));
+        let trade_log = tokio::io::BufStream::new(std::io::Cursor::new(log.into()));
         let cancel = tokio_util::sync::CancellationToken::new();
         let url = reqwest::Url::from_str(&format!("http://{endpoint}")).expect("Failed to parse static ep");
         let handle = tokio::spawn(server::run_server(
@@ -46,6 +48,9 @@ impl RunningServer {
             url,
             token: Token([0;16])
         }
+    }
+    fn start_server() -> impl Future<Output = RunningServer> {
+        Self::start_server_with_log(Vec::new())
     }
     async fn stop(self) {
         drop(self.cancel);
@@ -137,6 +142,7 @@ async fn stream_state() {
     assert_eq!(wrapped.action, actions[2]);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.action, actions[3]);
+    let _full_state = client.get_state(0).await.expect("Could not get full state");
 }
 
 #[tokio::test]
@@ -183,4 +189,21 @@ async fn stream_fastsync() {
         }
     };
     assert_eq!(wrapped.balances.assets[&PlayerId::assume_username_correct("test".to_owned())][&AssetId::from("cobblestone")], 6);
+}
+
+// After nasty bug that caused reloads to not have newlines
+#[tokio::test]
+async fn reload_state() {
+    let server1 = RunningServer::start_server().await;
+    let client1 = Remote::new(server1.url, server1.token);
+    for i in [
+        tpex::Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 1, banker: PlayerId::the_bank() },
+        tpex::Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 2, banker: PlayerId::the_bank() },
+        tpex::Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 3, banker: PlayerId::the_bank() },
+    ] { client1.apply(&i).await.expect("Failed to apply action"); }
+    let state1 = client1.get_state(0).await.expect("Could not get initial state");
+    let server2 = RunningServer::start_server_with_log(state1.clone()).await;
+    let client2 = Remote::new(server2.url, server2.token);
+    let state2 = client2.get_state(0).await.expect("Could not get second state");
+    assert_eq!(state1, state2);
 }
