@@ -23,6 +23,7 @@ struct RunningServer {
 impl RunningServer {
     async fn start_server_with_log(log: impl Into<Vec<u8>>) -> RunningServer {
         let _ = tracing_subscriber::fmt()
+            .with_test_writer()
             .with_env_filter(EnvFilter::try_new("trace").unwrap())
             .try_init();
 
