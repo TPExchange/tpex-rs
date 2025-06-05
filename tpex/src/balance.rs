@@ -53,6 +53,8 @@ impl BalanceTracker {
     pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> {
         self.assets.get(player).map_or_else(Default::default, Clone::clone)
     }
+    /// Get all players' assets
+    pub fn get_all_assets(&self) -> &std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>> { &self.assets }
     /// Get all balances
     pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, Coins> { self.balances.clone() }
 

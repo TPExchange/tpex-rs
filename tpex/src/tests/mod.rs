@@ -619,13 +619,15 @@ async fn lifecycle() {
 
 
 
-    let ser: StateSync = (&state.state).into();
+    let sync: StateSync = (&state.state).into();
+    let sync_json = serde_json::to_string(&sync).expect("Failed to JSONise StateSync");
     println!("State: {:?}", state.state);
-    println!("Serialised state: {ser:?}");
-    let deser: State = ser.clone().try_into().expect("Could not deserialise state sync");
+    println!("Serialised state: {sync:?}");
+    println!("Serialised JSON: {sync_json:?}");
+    let sync_dejson: StateSync = serde_json::from_str(&sync_json).expect("Failed to de-JSONise StateSync");
+    let deser: State = sync_dejson.try_into().expect("Could not deserialise state sync");
     let deser_ser: StateSync = (&deser).into();
-    assert_eq!(ser, deser_ser, "FastSync mismatch");
-
+    assert_eq!(sync, deser_ser, "FastSync mismatch");
 
     // let (state, mut source) = {
     //     let tmp = state.state.clone();
@@ -637,6 +639,203 @@ async fn lifecycle() {
     // let mut state2 = State::new();
     // state2.replay(&mut source.as_ref(), true).await.expect("Failed to replay");
     // assert_eq!(serde_json::to_string(&state).unwrap(), serde_json::to_string(&state2).unwrap());
+}
+
+#[tokio::test]
+async fn authorisations() {
+    let authed = AssetId::from("cobblestone");
+    let unauthed = AssetId::from("wither_skeleton_skull");
+    let mut state = MatchStateWrapper {
+        state: State::new(),
+        sink: WriteSink::default(),
+        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+    };
+    println!("Depositing authorised item");
+    state.assert_state(
+        Action::Deposit {
+            player: player(1),
+            asset: authed.clone(),
+            count: 1,
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Depositing to-be unauthorised item");
+    state.assert_state(
+        Action::Deposit {
+            player: player(1),
+            asset: unauthed.clone(),
+            count: 100,
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 100)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Restricting item");
+    state.assert_state(
+        Action::UpdateRestricted {
+            restricted_assets: vec![unauthed.clone()],
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 100)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Withdrawing restricted asset after already having deposited it");
+    state.assert_state(
+        Action::WithdrawalRequested {
+            player: player(1),
+            assets: [(unauthed.clone(), 1)].into()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 99)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Sending restricted asset to unauthorised player");
+    state.assert_state(
+        Action::TransferAsset {
+            payer: player(1),
+            payee: player(2),
+            asset: unauthed.clone(),
+            count: 2
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Attempting to withdraw restricted asset from unauthorised player");
+    state.assert_state(
+        Action::WithdrawalRequested {
+            player: player(2),
+            assets: [(unauthed.clone(), 2)].into()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    println!("Manually authorising player withdrawing restricted item");
+    state.assert_state(
+        Action::AuthoriseRestricted {
+            authorisee: player(2),
+            banker: PlayerId::the_bank(),
+            asset: unauthed.clone(),
+            new_count: 1
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Attempting to overwithdraw restricted asset from newly authorised player");
+    state.assert_state(
+        Action::WithdrawalRequested {
+            player: player(2),
+            assets: [(unauthed.clone(), 2)].into()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    println!("Withdrawing restricted asset from newly authorised player");
+    state.assert_state(
+        Action::WithdrawalRequested {
+            player: player(2),
+            assets: [(unauthed.clone(), 1)].into()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Again overwithdrawing restricted asset from newly authorised player");
+    state.assert_state(
+        Action::WithdrawalRequested {
+            player: player(2),
+            assets: [(unauthed.clone(), 1)].into()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    println!("Unrestricting asset again");
+    state.assert_state(
+        Action::UpdateRestricted {
+            restricted_assets: Vec::new(),
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
+            ..Default::default()
+        }
+    ).await;
+    println!("Withdrawing final part");
+    state.assert_state(
+        Action::WithdrawalRequested {
+            player: player(2),
+            assets: [(unauthed.clone(), 1)].into()
+        },
+        ExpectedState {
+            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97)],
+            ..Default::default()
+        }
+    ).await;
+}
+
+#[tokio::test]
+async fn update_bankers() {
+    let mut state = MatchStateWrapper {
+        state: State::new(),
+        sink: WriteSink::default(),
+        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+    };
+    assert!(!state.state.is_banker(&player(1)));
+    println!("Replacing default banker");
+    state.assert_state(
+        Action::UpdateBankers {
+            bankers: vec![player(1), player(3)],
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    assert_eq!(state.state.get_bankers(), [player(1), player(3)].into());
+    println!("Trying to update bankers as non-banker");
+    state.assert_state(
+        Action::UpdateBankers {
+            bankers: vec![player(1), player(3)],
+            banker: player(2)
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    println!("Trying to update bankers as ex-banker");
+    state.assert_state(
+        Action::UpdateBankers {
+            bankers: vec![player(1), player(3)],
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
 }
 
 #[tokio::test]

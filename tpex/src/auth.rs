@@ -57,7 +57,7 @@ impl AuthTracker {
     /// Returns true if the given item is currently restricted
     pub fn is_restricted(&self, asset: &AssetId) -> bool { self.restricted.contains(asset) }
     /// Lists all restricted items
-    pub fn get_restricted(&self) -> impl Iterator<Item = &AssetId> { self.restricted.iter() }
+    pub fn get_restricted(&self) -> &std::collections::HashSet<AssetId> { &self.restricted }
     /// Gets a list of all bankers
     pub fn get_bankers(&self) -> HashSet<PlayerId> { self.bankers.clone() }
     /// Returns true if the given player is an banker
@@ -78,11 +78,26 @@ impl AuthTracker {
             self.authorisations.entry(player).or_default().insert(asset, new_count);
         }
     }
-    /// Updates the list of restricted assets
-    pub fn update_restricted(&mut self, restricted: std::collections::HashSet<AssetId>) {
-        self.restricted = restricted;
+    /// Increases the maximum amount of an item a player is allowed to withdraw
+    ///
+    /// @returns The new limit the player has
+    pub fn increase_authorisation(&mut self, player: PlayerId, asset: AssetId, increase: u64) -> Result<u64> {
+        self.authorisations.entry(player).or_default()
+            .entry(asset).or_default()
+            .checked_add(increase).ok_or(Error::Overflow)
     }
     /// Updates the list of restricted assets
+    pub fn update_restricted(&mut self, restricted: std::collections::HashSet<AssetId>) {
+        // Clean up the irrelevant tables, so that auths don't secretly lie around
+        let newly_unrestricted = self.restricted.difference(&restricted);
+        for i in newly_unrestricted {
+            for asset_auths in self.authorisations.values_mut() {
+                asset_auths.remove(i);
+            }
+        }
+        self.restricted = restricted;
+    }
+    /// Updates the list of bankers
     pub fn update_bankers(&mut self, bankers: std::collections::HashSet<PlayerId>) {
         self.bankers = bankers;
     }

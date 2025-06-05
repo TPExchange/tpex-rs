@@ -507,6 +507,8 @@ impl State {
     pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, Coins> { self.balance.get_bals() }
     /// Get a player's assets
     pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> { self.balance.get_assets(player) }
+    /// Get all players' assets
+    pub fn get_all_assets(&self) -> &std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>> { self.balance.get_all_assets() }
     /// List all withdrawals
     pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawal> { self.withdrawal.get_withdrawals() }
     /// List all withdrawals
@@ -524,7 +526,7 @@ impl State {
     /// Returns true if the given item is currently restricted
     pub fn is_restricted(&self, asset: &AssetId) -> bool { self.auth.is_restricted(asset) }
     /// Lists all restricted items
-    pub fn get_restricted(&self) -> impl Iterator<Item = &AssetId> { self.auth.get_restricted() }
+    pub fn get_restricted(&self) -> impl IntoIterator<Item = &AssetId> { self.auth.get_restricted() }
     /// Gets a list of all bankers
     pub fn get_bankers(&self) -> HashSet<PlayerId> { self.auth.get_bankers() }
     /// Returns true if the given player is an banker
@@ -590,6 +592,7 @@ impl State {
                     return Err(Error::UnknownAsset { asset });
                 }
                 self.balance.commit_asset_add(&player, &asset, count);
+                self.auth.increase_authorisation(player, asset, count).expect("Authorisation overflow");
 
                 Ok(())
             },
@@ -707,7 +710,17 @@ impl State {
                 {
                     return Err(Error::UnknownAsset { asset: asset.clone() });
                 }
-                self.auth.update_restricted(FromIterator::from_iter(restricted_assets));
+                let restricted_assets = HashSet::from_iter(restricted_assets);
+                // A list of the assets that just became restricted
+                let newly_restricted = restricted_assets.difference(self.auth.get_restricted()).cloned().collect::<Vec<_>>();
+                self.auth.update_restricted(restricted_assets.clone());
+                // Authorise everyone who is already holding the item to withdraw what they have
+                for asset in newly_restricted {
+                    for (player, their_assets) in self.balance.get_all_assets() {
+                        let Some(count) = their_assets.get(&asset).copied() else { continue; };
+                        self.auth.set_authorisation(player.clone(), asset.clone(), count);
+                    }
+                }
                 Ok(())
             },
             Action::AuthoriseRestricted { authorisee, asset, new_count, banker } => {
