@@ -12,7 +12,6 @@ use withdrawal::WithdrawalSync;
 pub use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
 mod balance;
-mod investment;
 mod order;
 mod withdrawal;
 mod coins;
@@ -26,9 +25,9 @@ pub const DIAMOND_NAME: &str = "diamond";
 pub const DIAMOND_RAW_COINS: Coins = Coins::from_coins(1000);
 
 const INITIAL_BANK_RATES: BankRates = BankRates {
-    investment_ppm:     2_5000,
-    buy_order_ppm:      2_5000,
-    sell_order_ppm:     2_5000,
+    investment_ppm:    25_0000,
+    buy_order_ppm:      0_0000,
+    sell_order_ppm:     0_0000,
     diamond_buy_ppm:    1_0000,
     diamond_sell_ppm:   1_0000,
 };
@@ -200,23 +199,6 @@ pub enum Action {
         bankers: Vec<PlayerId>,
         banker: PlayerId,
     },
-    /// Update the list of investable assets to the given list
-    UpdateInvestables {
-        assets: Vec<AssetId>,
-        banker: PlayerId,
-    },
-    /// Lock away assets for use by the bank, with the hope of profit
-    Invest {
-        player: PlayerId,
-        asset: AssetId,
-        count: u64
-    },
-    /// Stop the given assets from being locked away, but should fail if they're currently in use
-    Uninvest {
-        player: PlayerId,
-        asset: AssetId,
-        count: u64
-    },
     /// Update the list of items that the bank is willing to convert
     // UpdateConvertables {
     //     convertables: Vec<Conversion>,
@@ -361,9 +343,6 @@ pub enum Error {
     Overflow,
     InvalidId{id: u64},
     UnknownAsset{asset: AssetId},
-    NotInvestable{asset: AssetId},
-    InvestmentBusy{asset: AssetId, amount_over: u64},
-    NotConvertable{from: AssetId, to: AssetId},
     AlreadyDone,
     NotABanker{player: PlayerId},
     CoinStringMangled,
@@ -395,15 +374,6 @@ impl std::fmt::Display for Error {
             }
             Error::UnknownAsset { asset } => {
                 write!(f, "The item \"{asset}\" is not on our list.")
-            },
-            Error::NotInvestable { asset } => {
-                write!(f, "The item \"{asset}\" is not investable yet.")
-            },
-            Error::InvestmentBusy { asset, amount_over} => {
-                write!(f, "The action failed, as we would need {amount_over} more invested {asset}.")
-            },
-            Error::NotConvertable { from, to } => {
-                write!(f, "We do not currently offer conversion from {from} to {to}.")
             },
             Error::AlreadyDone => {
                 write!(f, "The requested action is redundant.")
@@ -467,7 +437,6 @@ pub struct State {
     asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     auth: auth::AuthTracker,
     balance: balance::BalanceTracker,
-    investment: investment::InvestmentTracker,
     order: order::OrderTracker,
     withdrawal: withdrawal::WithdrawalTracker
 }
@@ -481,7 +450,6 @@ impl Default for State {
             next_id: 1,
             auth: Default::default(),
             balance: Default::default(),
-            investment: Default::default(),
             order: Default::default(),
             withdrawal: Default::default(),
             asset_info,
@@ -539,8 +507,6 @@ impl State {
             Action::Deposit { banker, .. } |
             Action::UpdateBankRates { banker, .. } |
             Action::UpdateBankers { banker, .. } |
-            // Action::UpdateConvertables { banker, .. } |
-            Action::UpdateInvestables { banker, .. } |
             Action::UpdateRestricted { banker, .. } |
             Action::WithdrawalCompleted { banker, .. } |
             Action::Undeposit { banker, .. }
@@ -548,13 +514,10 @@ impl State {
 
             Action::BuyCoins { player, .. } |
             Action::BuyOrder { player, .. } |
-            // Action::InstantConvert { player, .. }  |
-            Action::Invest { player, .. } |
             Action::SellCoins { player, .. } |
             Action::SellOrder { player, .. } |
             Action::TransferAsset { payer: player, .. } |
             Action::TransferCoins { payer: player, .. } |
-            Action::Uninvest { player, .. } |
             Action::WithdrawalRequested { player, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Normal, player: player.clone()}),
 
@@ -760,33 +723,6 @@ impl State {
                 self.auth.update_bankers(FromIterator::from_iter(bankers));
                 Ok(())
             },
-            Action::UpdateInvestables { assets, banker } => {
-                self.check_banker(&banker)?;
-                // Check they're valid assets
-                if let Some(asset) =
-                    assets.iter()
-                    .find(|id| !self.asset_info.contains_key(*id))
-                {
-                    return Err(Error::UnknownAsset { asset: asset.clone() });
-                }
-                self.investment.update_investables(FromIterator::from_iter(assets));
-                Ok(())
-            },
-            Action::Invest { player, asset, count } => {
-                // Check to see if we can invest it before we commit to its removal
-                if !self.investment.is_investable(&asset) {
-                    return Err(Error::NotInvestable {asset});
-                }
-                // Check to see if the user can afford it, and if so, invest
-                self.balance.commit_asset_removal(&player, &asset, count)?;
-                self.investment.add_investment(&player, &asset, count);
-                Ok(())
-            },
-            Action::Uninvest { player, asset, count } => {
-                // Don't check to see if it's currently investable, or else stuff might get trapped
-                self.investment.try_remove_investment(&player, &asset, count)?;
-                Ok(())
-            },
             /*
             Action::InstantConvert { from, to, count, player } => {
                 // BUG: will fail audit
@@ -880,11 +816,11 @@ impl State {
 }
 impl Auditable for State {
     fn soft_audit(&self) -> Audit {
-        self.balance.soft_audit() + self.investment.soft_audit() + self.order.soft_audit() + self.withdrawal.soft_audit()
+        self.balance.soft_audit() + self.order.soft_audit() + self.withdrawal.soft_audit()
     }
 
     fn hard_audit(&self) -> Audit {
-        self.balance.hard_audit() + self.investment.hard_audit() + self.order.hard_audit() + self.withdrawal.hard_audit()
+        self.balance.hard_audit() + self.order.hard_audit() + self.withdrawal.hard_audit()
     }
 }
 
@@ -905,7 +841,6 @@ impl From<&State> for StateSync {
             balances: (&value.balance).into(),
             rates: value.rates.clone(),
             auth: (&value.auth).into(),
-            // investment: (&value.investment).into(),
             order: (&value.order).into(),
             withdrawal: (&value.withdrawal).into(),
         }
@@ -918,7 +853,6 @@ impl TryFrom<StateSync> for State {
             next_id: value.current_id.checked_add(1).ok_or(Error::Overflow)?,
             rates: value.rates,
             balance: value.balances.try_into()?,
-            investment: Default::default(), //value.investment.try_into()?,
             asset_info: DEFAULT_ASSET_INFO.clone(),
             order: value.order.try_into()?,
             withdrawal: value.withdrawal.try_into()?,
