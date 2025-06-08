@@ -36,7 +36,7 @@ const INITIAL_BANK_RATES: BankRates = BankRates {
 pub struct PlayerId(String);
 impl PlayerId {
     /// Creates a player id, assuming that the given id is valid, correct, and authorized.
-    pub fn assume_username_correct(s: String) -> PlayerId { PlayerId(s) }
+    pub fn assume_username_correct(s: String) -> PlayerId { PlayerId(s.to_lowercase()) }
     /// Gets the internal name of the user
     pub fn get_raw_name(&self) -> &String { &self.0 }
     pub fn the_bank() -> PlayerId { PlayerId("#tpex".to_owned()) }
@@ -45,7 +45,7 @@ impl<'de> Deserialize<'de> for PlayerId {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de> {
-        String::deserialize(deserializer).map(PlayerId)
+        String::deserialize(deserializer).map(PlayerId::assume_username_correct)
     }
 }
 impl Serialize for PlayerId {
