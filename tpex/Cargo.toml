@@ -4,6 +4,7 @@ version = "0.4.1"
 edition = "2024"
 license = "GPL-3.0-only"
 description = "The core TPEx logic, without any server or client implementation"
+repository = "https://github.com/TPExchange/tpex-rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
