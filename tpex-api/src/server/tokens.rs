@@ -42,7 +42,7 @@ impl TokenHandler {
             pool: sqlx::SqlitePool::connect_with(opt).await?
         };
 
-        sqlx::migrate!("../migrations").run(&ret.pool).await?;
+        sqlx::migrate!("./migrations").run(&ret.pool).await?;
 
         Ok(ret)
     }
