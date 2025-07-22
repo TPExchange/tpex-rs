@@ -58,7 +58,7 @@ impl Remote {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.append(
             "Authorization",
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token)).expect("Unable to make token header"));
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")).expect("Unable to make token header"));
         Remote {
             client: reqwest::Client::builder().default_headers(headers).build().expect("Unable to build reqwest client"),
             endpoint

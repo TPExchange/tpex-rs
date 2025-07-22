@@ -233,13 +233,13 @@ impl<Players, Sink: tokio::io::AsyncWrite + std::marker::Unpin> MatchStateWrappe
         }
         for (p, gain) in expected.diamonds_sold {
             let total = DIAMOND_RAW_COINS.checked_mul(gain).unwrap();
-            let fee = total.fee_ppm(self.state.rates.diamond_sell_ppm).unwrap();
+            let fee = total.fee_ppm(self.state.rates.coins_buy_ppm).unwrap();
             expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(fee).expect("Failed to add fx fee");
             expected_bals.entry(p).or_default().checked_add_assign(total.checked_sub(fee).unwrap()).expect("Failed to add expected balance");
         }
         for (p, gain) in expected.diamonds_bought {
             let total = DIAMOND_RAW_COINS.checked_mul(gain).unwrap();
-            let fee = total.fee_ppm(self.state.rates.diamond_buy_ppm).unwrap();
+            let fee = total.fee_ppm(self.state.rates.coins_sell_ppm).unwrap();
             expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(fee).expect("Failed to add fx fee");
             expected_bals.entry(p).or_default().checked_sub_assign(total.checked_add(fee).unwrap()).expect("Failed to add expected balance");
         }

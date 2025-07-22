@@ -28,8 +28,8 @@ const INITIAL_BANK_RATES: BankRates = BankRates {
     investment_ppm:    25_0000,
     buy_order_ppm:      0_0000,
     sell_order_ppm:     0_0000,
-    diamond_buy_ppm:    1_0000,
-    diamond_sell_ppm:   1_0000,
+    coins_sell_ppm:    1_0000,
+    coins_buy_ppm:   1_0000,
 };
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Default, Debug, Clone, Hash)]
@@ -92,72 +92,101 @@ pub struct AutoConversion {
 pub enum Action {
     /// Deleted transaction, for when someone does a bad
     Deleted {
+        /// The reason it was deleted
         reason: String,
+        /// Who deleted it
         banker: PlayerId
     },
     /// Player deposited assets
     Deposit {
+        /// The player who should be credited with these assets
         player: PlayerId,
+        /// The asset to deposit
         asset: AssetId,
+        /// The number of that asset to deposit
         count: u64,
+        /// The banker who performed the deposit
         banker: PlayerId,
     },
     /// Player asked to withdraw assets
     WithdrawalRequested {
+        /// The player who requested the withdrawal
         player: PlayerId,
+        /// The assets to withdraw
         assets: std::collections::HashMap<AssetId,u64>
     },
     /// A banker has agreed to take out assets imminently
     WithdrawalCompleted {
+        /// The ID of the corresponding WithdrawalRequested transaction
         target: u64,
+        /// The banker who confirmed it
         banker: PlayerId,
     },
     /// The player got coins for giving diamonds
     BuyCoins {
+        /// The player who should be credited with the coins
         player: PlayerId,
+        /// The number of diamonds converted
         n_diamonds: u64,
     },
     /// The player got diamonds for giving coins
     SellCoins {
+        /// The player who should be credited with the diamonds
         player: PlayerId,
+        /// The number of diamonds converted
         n_diamonds: u64,
     },
     /// Player offers to buy assets at a price, and locks money away until cancelled
     ///
     /// Instant matches should favour the buyer
     BuyOrder {
+        /// The player who placed the order
         player: PlayerId,
+        /// The asset they wish to order
         asset: AssetId,
+        /// The number of that asset they wish to order
         count: u64,
+        /// The number of coins each individual asset will cost
         coins_per: Coins,
     },
     /// Player offers to sell assets at a price, and locks away assets until cancelled
     ///
     /// Instant matches should favour the seller
     SellOrder {
+        /// The player who placed the order
         player: PlayerId,
+        /// The asset they wish to order
         asset: AssetId,
+        /// The number of that asset they wish to order
         count: u64,
+        /// The number of coins each individual asset will cost
         coins_per: Coins,
     },
     /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
+        /// The new list of assets that are restricted
         restricted_assets: Vec<AssetId>,
+        /// The banker who submitted this restriction
         banker: PlayerId,
     },
     /// Allows a player to place new withdrawal requests up to new_count of an item
     ///
     /// XXX: This can and will nuke existing values, so check those race conditions!
     AuthoriseRestricted {
+        /// The player whose authorisation is being adjusted
         authorisee: PlayerId,
+        /// The banker who submitted this authorisation
         banker: PlayerId,
+        /// The asset that should be authorised
         asset: AssetId,
+        /// The new maximum amount this player can withdraw
         new_count: u64
     },
     /// Changes the fees
     UpdateBankRates {
         #[serde(flatten)]
         rates: BankRates,
+        /// The banker who submitted this update
         banker: PlayerId,
     },
     // TODO: Not sure about these yet, let's see what demand we get
@@ -179,24 +208,34 @@ pub enum Action {
     // }
     /// A transfer of coins from one player to another, no strings attached
     TransferCoins {
+        /// The player sending the coins
         payer: PlayerId,
+        /// The player receiving the coins
         payee: PlayerId,
+        /// The number of coins
         count: Coins
     },
     /// A transfer of items from one player to another, no strings attached
     TransferAsset {
+        /// The player sending the asset
         payer: PlayerId,
+        /// The player receiving the asset
         payee: PlayerId,
+        /// The name of the asset
         asset: AssetId,
+        /// The amount of the asset
         count: u64
     },
     /// Cancel the remaining assets and coins in a buy or sell order
     CancelOrder {
+        /// The transaction ID of the order to cancel
         target: u64
     },
     /// Update the list of bankers to the given list
     UpdateBankers {
+        /// The new list of bankers
         bankers: Vec<PlayerId>,
+        /// The banker who submitted this update
         banker: PlayerId,
     },
     /// Update the list of items that the bank is willing to convert
@@ -213,9 +252,13 @@ pub enum Action {
     // },
     /// Used to correct typos
     Undeposit {
+        /// The player who should have the items taken away
         player: PlayerId,
+        /// The asset to remove
         asset: AssetId,
+        /// The amount of those items to be removed
         count: u64,
+        /// The banker who submitted this action
         banker: PlayerId
     },
 }
@@ -402,11 +445,16 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct BankRates {
+    /// The parts per million fee for an investment return
     investment_ppm: u64,
+    /// The parts per million fee for each partial completion of a buy order
     buy_order_ppm: u64,
+    /// The parts per million fee for each partial completion of a sell order
     sell_order_ppm: u64,
-    diamond_buy_ppm: u64,
-    diamond_sell_ppm: u64
+    /// The parts per million fee for converting coins into diamonds
+    coins_sell_ppm: u64,
+    /// The parts per million fee for converting diamonds into coins
+    coins_buy_ppm: u64
 }
 impl BankRates {
     fn check(&self) -> Result<()> {
@@ -415,7 +463,7 @@ impl BankRates {
             // We don't need to limit this, as they just pay a lot, rather than losing money
             // self.buy_order_ppm > 1_000_000 ||
             self.sell_order_ppm > 1_000_000 ||
-            self.diamond_sell_ppm > 1_000_000
+            self.coins_buy_ppm > 1_000_000
             // We don't need to limit this, as they just pay a lot, rather than losing money
             // self.diamond_buy_ppm > 1_000_000
         {
@@ -649,7 +697,7 @@ impl State {
                 self.balance.commit_asset_removal(&player,&DIAMOND_NAME.to_owned(), n_diamonds)?;
                 // ... and give them the coins
                 let n_coins = DIAMOND_RAW_COINS.checked_mul(n_diamonds).expect("BuyCoins overflow");
-                let fee = n_coins.fee_ppm(self.rates.diamond_sell_ppm).expect("BuyCoins fee overflow"); // This panic stops inconsistencies
+                let fee = n_coins.fee_ppm(self.rates.coins_buy_ppm).expect("BuyCoins fee overflow"); // This panic stops inconsistencies
                 self.balance.commit_coin_add(&PlayerId::the_bank(), fee);
                 self.balance.commit_coin_add(&player, n_coins.checked_sub(fee).unwrap()); // This panic stops inconsistencies
                 Ok(())
@@ -657,7 +705,7 @@ impl State {
             Action::SellCoins { player, n_diamonds } => {
                 // Check and take coins from payer...
                 let n_coins = DIAMOND_RAW_COINS.checked_mul(n_diamonds)?;
-                let fee = n_coins.fee_ppm(self.rates.diamond_sell_ppm)?; // This panic stops inconsistencies
+                let fee = n_coins.fee_ppm(self.rates.coins_sell_ppm)?; // This panic stops inconsistencies
                 self.balance.commit_coin_removal(&player, n_coins.checked_add(fee)?)?;
                 self.balance.commit_coin_add(&PlayerId::the_bank(), fee);
                 // ... and give them the diamonds
@@ -789,7 +837,7 @@ impl State {
         Ok(())
     }
     /// Atomically try to apply an action, and if successful, write to given stream
-    pub async fn apply(&mut self, action: Action, mut out: impl tokio::io::AsyncWrite) -> Result<u64> {
+    pub async fn apply(&mut self, action: Action, out: impl tokio::io::AsyncWrite) -> Result<u64> {
         let id = self.next_id;
         let wrapped_action = WrappedAction {
             id,

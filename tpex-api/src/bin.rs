@@ -18,7 +18,7 @@ async fn main() {
 
     // Crash on inconsistency
     std::panic::set_hook(Box::new(move |info| {
-        let _ = writeln!(std::io::stderr(), "{}", info);
+        let _ = writeln!(std::io::stderr(), "{info}");
         std::process::exit(1);
     }));
 
