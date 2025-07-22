@@ -1,13 +1,13 @@
 #![cfg(test)]
 
-use std::{io::Write, str::FromStr};
+use std::{io::Write, str::FromStr, sync::Arc};
 
 use futures::StreamExt;
 use tokio_util::sync::DropGuard;
 use tpex::{AssetId, PlayerId, WrappedAction};
 use tracing_subscriber::EnvFilter;
 
-use crate::{server::{self, tokens::TokenHandler}, Remote, Token, TokenLevel};
+use crate::{server::{self, tokens::TokenHandler}, Mirrored, Remote, Token, TokenLevel};
 
 fn player(n: u64) -> PlayerId { PlayerId::assume_username_correct(n.to_string()) }
 
@@ -103,7 +103,7 @@ async fn stream_state() {
     let server = RunningServer::start_server().await;
     let client = Remote::new(server.url.clone(), server.token);
     let client_copy = Remote::new(server.url.clone(), server.token);
-    let stream = client.stream_state(1).await.expect("FastSync failed");
+    let stream = client.stream_state(1).await.expect("Stream failed");
     let actions = vec![
         tpex::Action::Deposit {
             player: PlayerId::assume_username_correct("test".to_owned()),
@@ -144,6 +144,56 @@ async fn stream_state() {
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.action, actions[3]);
     let _full_state = client.get_state(0).await.expect("Could not get full state");
+}
+
+#[tokio::test]
+async fn mirrored_stream_state() {
+    let server = RunningServer::start_server().await;
+    let client = Arc::new(Mirrored::new(server.url.clone(), server.token));
+    let client_2 = Arc::new(Mirrored::new(server.url.clone(), server.token));
+    let client_clone = client.clone();
+    let stream = client.stream().await.expect("Stream failed");
+    let actions = vec![
+        tpex::Action::Deposit {
+            player: PlayerId::assume_username_correct("test".to_owned()),
+            asset: AssetId::from("cobblestone"),
+            count: 1,
+            banker: PlayerId::the_bank()
+        },
+        tpex::Action::Deposit {
+            player: PlayerId::assume_username_correct("test".to_owned()),
+            asset: AssetId::from("cobblestone"),
+            count: 2,
+            banker: PlayerId::the_bank()
+        },
+        tpex::Action::Deposit {
+            player: PlayerId::assume_username_correct("test".to_owned()),
+            asset: AssetId::from("cobblestone"),
+            count: 3,
+            banker: PlayerId::the_bank()
+        },
+        tpex::Action::Deposit {
+            player: PlayerId::assume_username_correct("test".to_owned()),
+            asset: AssetId::from("cobblestone"),
+            count: 4,
+            banker: PlayerId::the_bank()
+        },
+    ];
+    let actions_copy = actions.clone();
+    let client_2_clone = client_2.clone();
+    tokio::spawn(async move {
+        for i in actions_copy {
+            client_2_clone.apply(i).await.expect("Failed to apply action");
+        }
+    });
+    let mut stream = std::pin::pin!(stream);
+    let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
+    assert_eq!(wrapped.1.action, actions[1]);
+    let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
+    assert_eq!(wrapped.1.action, actions[2]);
+    let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
+    assert_eq!(wrapped.1.action, actions[3]);
+    assert_eq!(tpex::StateSync::from(&*client_2.fastsync().await.unwrap()), tpex::StateSync::from(&*client_clone.fastsync().await.unwrap()))
 }
 
 #[tokio::test]

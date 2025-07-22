@@ -6,7 +6,7 @@ mod shared;
 #[cfg(feature="server")]
 pub mod server;
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use reqwest::StatusCode;
 use reqwest_websocket::{Message, RequestBuilderExt};
 pub use shared::*;
@@ -82,7 +82,7 @@ impl Remote {
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.bytes().await?.to_vec())
     }
-    pub async fn stream_state(&self, from: u64) -> Result<impl futures::Stream<Item=Result<tpex::WrappedAction>>> {
+    pub async fn stream_state(&self, from: u64) -> Result<impl futures::Stream<Item=Result<tpex::WrappedAction>> + use<>> {
         let mut target = self.endpoint.clone();
         target.query_pairs_mut().append_pair("from", &from.to_string());
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
@@ -189,5 +189,14 @@ impl Mirrored {
     // This isn't synced
     pub async fn asset_info(&self, asset: &AssetId) -> std::result::Result<AssetInfo, tpex::Error> {
         self.state.read().await.asset_info(asset)
+    }
+    pub async fn stream(self: std::sync::Arc<Self>) -> Result<impl futures::Stream<Item=Result<(std::sync::Arc<Self>, tpex::WrappedAction)>>> {
+        let next_id = self.state.read().await.get_next_id();
+        let this: std::sync::Arc<Self> = self.clone();
+        let stream = self.remote.stream_state(next_id).await?;
+        Ok(stream.and_then(move |wrapped_action| { let this = this.clone(); async move  {
+            this.state.write().await.apply(wrapped_action.action.clone(), tokio::io::sink()).await?;
+            Ok((this, wrapped_action))
+        }}))
     }
 }
