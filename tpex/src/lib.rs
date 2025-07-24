@@ -256,6 +256,8 @@ pub enum Action {
         action: Box<Action>,
         /// The player proposing the action
         proposer: PlayerId,
+        /// The shared account that this proposal applies to
+        target: SharedId
     },
     /// Agree to a proposal
     Agree {
@@ -624,8 +626,11 @@ impl State {
             Action::CancelOrder { target } =>
                 Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target)?.player.clone()}),
 
-            Action::Propose { proposer, action } => {
+            Action::Propose { proposer, action, .. } => {
                 let perms = self.perms(action)?;
+                if perms.level != ActionLevel::Normal {
+                    return Err(Error::NotABanker { player: perms.player });
+                }
                 Ok(ActionPermissions{player: proposer.clone(), level: perms.level})
             },
 
@@ -837,32 +842,34 @@ impl State {
             Action::CreateOrUpdateShared { name, owners, min_difference, min_votes  } => {
                 self.shared_account.create_or_update(name, owners.into_iter().collect(), min_difference, min_votes)
             },
-            Action::Propose { action, proposer } => {
-                let target: SharedId = self.perms(action.as_ref())?.player.try_into().map_err(|_| Error::InvalidSharedId)?;
-                // We have to manually check whether this player is allowed to make a proposal, as only the agree/disagree functions check directly
-                let proposer = match SharedId::try_from(proposer)  {
-                    Ok(shared) => {
-                        // If the shared account is controlled by the proposer, this goes straight through
-                        if target.is_controlled_by(&shared) {
-                            return self.apply_inner(id, *action);
-                        }
-                        // Otherwise, we just treat it like a normal player
-                        shared.into()
-                    },
-                    // If it's not a shared account, then we don't need to do anything
-                    Err(player) => player
-                };
+            Action::Propose { action, proposer, target } => {
+                let expected_target: SharedId = self.perms(action.as_ref())?.player.try_into().map_err(|_| Error::InvalidSharedId)?;
+                // Make sure that the target is owned by the player
                 if !self.shared_account.is_owner(&target, &proposer)? {
                     return Err(Error::UnauthorisedShared)
                 }
+                // If this action applies to a different target, then the only way this is OK is if the expected_target is controlled by target
+                if expected_target != target {
+                    // We have to proceed even if this account doesn't exist, because of the CreateOrUpdate command
+                    //
+                    // if !self.shared_account.contains(&expected_target) {
+                    //     return Err(Error::InvalidSharedId)
+                    // }
+
+                    // If the expected target is not controlled by the target, this is unauthorised
+                    if !expected_target.is_controlled_by(&target) {
+                        return Err(Error::UnauthorisedShared);
+                    }
+                    // Otherwise, this is definitely authorised, and we can continue
+                }
                 self.shared_account.add_proposal(id, target, *action)?;
                 // The player agrees to their own proposal.
-                //
-                // We then process it if it immediately passes
                 if let Some(action) = self.shared_account.vote(id, proposer, true)? {
+                    // We then process it if it immediately passes
                     self.apply_inner(id, action)?
                 }
                 Ok(())
+
             },
             Action::Disagree { player, proposal_id } => {
                 if let Some(action) = self.shared_account.vote(proposal_id, player, false)? {
