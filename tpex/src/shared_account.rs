@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::{Div, DivAssign};
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde::de::Error;
@@ -13,8 +15,14 @@ impl SharedId {
 }
 impl SharedId {
     pub fn parts(&self) -> impl DoubleEndedIterator<Item = &str> {
-        // Skip the leading slash and split
-        self.0.0[1..].split('/')
+        // If this is the bank, there are no parts
+        if self.0.0.len() == 1 {
+            None.into_iter().flatten()
+        }
+        else {
+            // Skip the leading slash and split
+            Some(self.0.0[1..].split('/')).into_iter().flatten()
+        }
     }
     pub fn take_name(&self) -> (impl DoubleEndedIterator<Item = &str>, &str) {
         let last_delim_pos = self.0.0.rfind('/').unwrap();
@@ -34,6 +42,17 @@ impl SharedId {
             Some(SharedId(PlayerId::assume_username_correct(self.0.0[..last_delim_pos].to_string())))
         }
     }
+    pub fn try_concat(mut self, name: &str) -> Result<Self, Self> {
+        if name.contains('/') {
+            Err(self)
+        }
+        else {
+            self.0.0.reserve(name.len() + 1);
+            self.0.0.push('/');
+            self.0.0.push_str(name);
+            Ok(self)
+        }
+    }
     pub fn is_controlled_by(&self, other: &SharedId) -> bool {
         // Check that it is prefixed by other
         if !self.0.0.starts_with(&other.0.0) {
@@ -48,18 +67,34 @@ impl SharedId {
         }
     }
 }
+impl DivAssign for SharedId {
+    // We are using pathing syntax, so this really should be a `+=`
+    #[allow(clippy::suspicious_op_assign_impl)]
+    fn div_assign(&mut self, rhs: Self) {
+        self.0.0 += &rhs.0.0
+    }
+}
+impl Div for SharedId {
+    type Output = Self;
+
+    fn div(mut self, rhs: Self) -> Self::Output {
+        self /= rhs;
+        self
+    }
+}
 impl TryFrom<PlayerId> for SharedId {
     type Error = PlayerId;
 
     fn try_from(value: PlayerId) -> Result<Self, Self::Error> {
-        if value.0.ends_with('/') && value.0.len() != 1 {
-            Err(value)
+        // It's the bank!
+        if value.get_raw_name() == "/" {
+            return Ok(SharedId(value))
         }
-        else if value.0.starts_with('/') {
-            Ok(Self(value))
+        if !value.0.starts_with('/') || value.0.ends_with('/') || value.0.contains("//") {
+            Err(value)
         }
         else {
-            Err(value)
+            Ok(Self(value))
         }
     }
 }
@@ -85,13 +120,27 @@ impl<'a> Deserialize<'a> for SharedId {
         .map_err(|_inner| D::Error::custom("Expected leading slash for SharedId"))
     }
 }
+impl FromStr for SharedId {
+    type Err = PlayerId;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        PlayerId::assume_username_correct(s.to_owned()).try_into()
+    }
+}
+impl TryFrom<String> for SharedId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        PlayerId::assume_username_correct(value).try_into().map_err(|i: PlayerId| i.0)
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-struct Proposal {
-    target: SharedId,
-    action: Action,
-    agree: HashSet<PlayerId>,
-    disagree: HashSet<PlayerId>,
+pub struct Proposal {
+    pub target: SharedId,
+    pub action: Action,
+    pub agree: HashSet<PlayerId>,
+    pub disagree: HashSet<PlayerId>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -109,8 +158,9 @@ impl SharedAccount {
     pub fn new(owners: HashSet<PlayerId>, min_difference: u64, min_votes: u64, children: HashMap<String, SharedAccount>) -> Result<Self, crate::Error> {
         // If consensus is trivial or impossible, this clearly was an error
         if
-            min_difference > owners.len() as u64 || min_difference == 0 ||
-            min_votes      > owners.len() as u64 || min_votes      == 0
+            min_difference > owners.len() as u64 ||
+            min_votes > owners.len() as u64 ||
+            min_votes == 0
         {
             Err(crate::Error::InvalidThreshold)
         }
@@ -147,34 +197,23 @@ impl SharedAccount {
     pub fn min_votes(&self) -> u64 {
         self.min_votes
     }
+
+    pub fn bottom_up(&self, base: SharedId, func: &mut impl FnMut(SharedId, &SharedAccount)) {
+        for (name, account) in &self.children {
+            account.bottom_up(base.clone().try_concat(name).unwrap(), func);
+        }
+        func(base, self)
+    }
+
+    pub fn children(&self) -> &HashMap<String, SharedAccount> {
+        &self.children
+    }
 }
-
-// #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-// struct SharedAccountSync {
-//     /// The players who own the shared account
-//     pub owners: HashSet<PlayerId>,
-//     /// The minimum number of owners who need to agree in order to act on the account
-//     ///
-//     /// There is no separate number for management, because someone could just dump all the money out of the account as is
-//     pub threshold: usize,
-// }
-// impl TryInto<SharedAccount> for SharedAccountSync {
-//     type Error = Error;
-
-//     fn try_into(self) -> Result<SharedAccount, Self::Error> {
-//         SharedAccount::new(self.owners, self.threshold)
-//     }
-// }
-// impl From<SharedAccount> for SharedAccountSync {
-//     fn from(val: SharedAccount) -> Self {
-//         SharedAccountSync { owners: val.owners, threshold: val.threshold }
-//     }
-// }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SharedSync {
-    bank: SharedAccount,
-    proposals: BTreeMap<u64, Proposal>
+    pub bank: SharedAccount,
+    pub proposals: BTreeMap<u64, Proposal>
 }
 
 
@@ -191,6 +230,13 @@ impl SharedTracker {
         }
     }
     pub fn create_or_update(&mut self, id: SharedId, owners: HashSet<PlayerId>, min_difference: u64, min_votes: u64) -> Result<(), crate::Error> {
+        if
+            min_difference > owners.len() as u64 ||
+            min_votes > owners.len() as u64 ||
+            min_votes == 0
+        {
+            return Err(crate::Error::InvalidThreshold);
+        }
         let (parent, name) = id.take_name();
         // Look up the shared account's position in the tree
         match self.bank.get_mut(parent).ok_or(crate::Error::InvalidSharedId)?.children.entry(name.to_string()) {
@@ -262,17 +308,23 @@ impl SharedTracker {
         }
         Ok(None)
     }
-    pub fn close(&mut self, id: &SharedId) -> Result<(), crate::Error> {
+    pub fn wind_up(&mut self, id: SharedId, mut clean_one: impl FnMut(&SharedId)) -> Result<(), crate::Error> {
         // You can't wind up the bank, it has no parent and would cause terrible issues!
-        if id == &SharedId::the_bank() {
+        if id == SharedId::the_bank() {
             return Err(crate::Error::InvalidSharedId)
         }
         // Get the parent, and remove the child
         let (parent, name) = id.take_name();
         let parent = self.bank.get_mut(parent).ok_or(crate::Error::InvalidSharedId)?;
-        let _target = parent.children.remove(name).ok_or(crate::Error::InvalidSharedId)?;
+        let target = parent.children.remove(name).ok_or(crate::Error::InvalidSharedId)?;
+        // Grab a list of all the accounts being destroyed
+        let mut to_remove = std::collections::HashSet::new();
+        target.bottom_up(id, &mut |i, _| {
+            clean_one(&i);
+            to_remove.insert(i);
+        });
         // Remove the proposals
-        self.proposals.retain(|_, proposal| &proposal.target != id);
+        self.proposals.retain(|_, proposal| !to_remove.contains(&proposal.target));
         Ok(())
     }
 }

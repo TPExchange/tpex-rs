@@ -633,7 +633,7 @@ impl State {
                 Ok(ActionPermissions{level: ActionLevel::Normal, player: account.clone().into()}),
 
             Action::CreateOrUpdateShared { name, .. } =>
-                Ok(ActionPermissions{level: ActionLevel::Normal, player: name.parent().ok_or(Error::InvalidSharedId)?.into()})
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: name.clone().into()})
         }
     }
     /// Nice macro for checking whether a player is a banker
@@ -839,7 +839,19 @@ impl State {
             },
             Action::Propose { action, proposer } => {
                 let target: SharedId = self.perms(action.as_ref())?.player.try_into().map_err(|_| Error::InvalidSharedId)?;
-                // We have to manually check whether this player is allowed to make a proposal, as only the agree/disagree functions chec
+                // We have to manually check whether this player is allowed to make a proposal, as only the agree/disagree functions check directly
+                let proposer = match SharedId::try_from(proposer)  {
+                    Ok(shared) => {
+                        // If the shared account is controlled by the proposer, this goes straight through
+                        if target.is_controlled_by(&shared) {
+                            return self.apply_inner(id, *action);
+                        }
+                        // Otherwise, we just treat it like a normal player
+                        shared.into()
+                    },
+                    // If it's not a shared account, then we don't need to do anything
+                    Err(player) => player
+                };
                 if !self.shared_account.is_owner(&target, &proposer)? {
                     return Err(Error::UnauthorisedShared)
                 }
@@ -866,18 +878,18 @@ impl State {
             },
             Action::WindUp { account } => {
                 let parent = account.parent().ok_or(Error::InvalidSharedId)?;
-                // Move all the assets to the parent
-                let assets = self.balance.get_assets(account.as_ref());
-                for (asset, count) in assets {
-                    self.balance.commit_asset_removal(account.as_ref(), &asset, count).expect("Failed to remove assets in windup");
-                    self.balance.commit_asset_add(parent.as_ref(), &asset, count);
-                }
-                // Move all the coins to the parent
-                let coins = self.balance.get_bal(account.as_ref());
-                self.balance.commit_coin_removal(account.as_ref(), coins).expect("Failed to remove coins in windup");
-                self.balance.commit_coin_add(parent.as_ref(), coins);
-                // Close the shared account
-                self.shared_account.close(&account)
+                self.shared_account.wind_up(account, |account| {
+                    // Move all the assets to the parent
+                    let assets = self.balance.get_assets(account.as_ref());
+                    for (asset, count) in assets {
+                        self.balance.commit_asset_removal(account.as_ref(), &asset, count).expect("Failed to remove assets in windup");
+                        self.balance.commit_asset_add(parent.as_ref(), &asset, count);
+                    }
+                    // Move all the coins to the parent
+                    let coins = self.balance.get_bal(account.as_ref());
+                    self.balance.commit_coin_removal(account.as_ref(), coins).expect("Failed to remove coins in windup");
+                    self.balance.commit_coin_add(parent.as_ref(), coins);
+                })
             }
         }
     }
