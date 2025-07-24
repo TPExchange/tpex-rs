@@ -9,6 +9,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use withdrawal::WithdrawalSync;
 
+use crate::shared_account::{SharedId, SharedSync};
+
 pub use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
 mod balance;
@@ -16,6 +18,7 @@ mod order;
 mod withdrawal;
 mod coins;
 mod auth;
+mod shared_account;
 mod tests;
 
 pub use order::OrderType;
@@ -39,7 +42,7 @@ impl PlayerId {
     pub fn assume_username_correct(s: String) -> PlayerId { PlayerId(s) }
     /// Gets the internal name of the user
     pub fn get_raw_name(&self) -> &String { &self.0 }
-    pub fn the_bank() -> PlayerId { PlayerId("#tpex".to_owned()) }
+    pub fn the_bank() -> PlayerId { PlayerId("/".to_owned()) }
 }
 impl<'de> Deserialize<'de> for PlayerId {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
@@ -189,23 +192,6 @@ pub enum Action {
         /// The banker who submitted this update
         banker: PlayerId,
     },
-    // TODO: Not sure about these yet, let's see what demand we get
-    // /// A futures contract is when someone promises to pay someone for assets in the future
-    // ///
-    // /// In the case of a default: as much of the asset is moved into the player's account
-    // Future {
-    //     buyer: PlayerId,
-    //     seller: Option<PlayerId>,
-    //     asset: AssetId,
-    //     count: i64,
-    //     coins_per: u64,
-    //     collateral: i64,
-    //     delivery_date: DateTimeUtc
-    // },
-    // /// Performed when a player doesn't have the required assets for a future
-    // Defaulted {
-
-    // }
     /// A transfer of coins from one player to another, no strings attached
     TransferCoins {
         /// The player sending the coins
@@ -238,18 +224,6 @@ pub enum Action {
         /// The banker who submitted this update
         banker: PlayerId,
     },
-    /// Update the list of items that the bank is willing to convert
-    // UpdateConvertables {
-    //     convertables: Vec<Conversion>,
-    //     banker: PlayerId,
-    // },
-    /// Give a player access to invested items, and lock away the items needed to replenish the invested stock
-    // InstantConvert {
-    //     player: PlayerId,
-    //     from: AssetId,
-    //     to: AssetId,
-    //     count: u64
-    // },
     /// Used to correct typos
     Undeposit {
         /// The player who should have the items taken away
@@ -260,6 +234,47 @@ pub enum Action {
         count: u64,
         /// The banker who submitted this action
         banker: PlayerId
+    },
+    /// Creates or updates a shared account
+    CreateOrUpdateShared {
+        /// The name of the shared account, which will be added onto the parent with a slash
+        ///
+        /// i.e. If /foo creates an account bar, then it will be called /foo/bar
+        ///
+        /// Note that the bank name "/" is implicit here
+        name: SharedId,
+        /// The players who control this account
+        owners: Vec<PlayerId>,
+        /// The minimum value of (agree - disagree) before a vote passes
+        min_difference: u64,
+        /// The minimum number of owners who need to vote in order for a proposal to be considered
+        min_votes: u64,
+    },
+    /// Proposes an action for a shared account
+    Propose {
+        /// The actual action to perform
+        action: Box<Action>,
+        /// The player proposing the action
+        proposer: PlayerId,
+    },
+    /// Agree to a proposal
+    Agree {
+        /// The player who agrees
+        player: PlayerId,
+        /// The ID of the proposal in question
+        proposal_id: u64,
+    },
+    /// Disagree to a proposal
+    Disagree {
+        /// The player who disagrees
+        player: PlayerId,
+        /// The ID of the proposal in question
+        proposal_id: u64,
+    },
+    /// Shut down a shared account, cancel all orders, and credit the remaining assets and coins to the parent
+    WindUp {
+        /// The shared account to wind up
+        account: SharedId,
     },
 }
 impl Action {
@@ -391,7 +406,10 @@ pub enum Error {
     CoinStringMangled,
     CoinStringTooPrecise,
     InvalidRates,
-    InvalidFastSync
+    InvalidFastSync,
+    InvalidThreshold,
+    InvalidSharedId,
+    UnauthorisedShared,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -435,6 +453,15 @@ impl std::fmt::Display for Error {
             },
             Error::InvalidFastSync => {
                 write!(f, "The provided FastSync struct was corrupted")
+            },
+            Error::InvalidThreshold => {
+                write!(f, "The provided threshold was either unsatisfiable or zero")
+            },
+            Error::InvalidSharedId => {
+                write!(f, "The requested action involves a non-existent shared account")
+            },
+            Error::UnauthorisedShared => {
+                write!(f, "The requested action requires the player to have access to a shared account that they do not")
             }
         }
 
@@ -486,21 +513,22 @@ pub struct State {
     auth: auth::AuthTracker,
     balance: balance::BalanceTracker,
     order: order::OrderTracker,
-    withdrawal: withdrawal::WithdrawalTracker
+    withdrawal: withdrawal::WithdrawalTracker,
+    shared_account: shared_account::SharedTracker
 }
 impl Default for State {
     fn default() -> State {
         let asset_info = DEFAULT_ASSET_INFO.clone();
         State {
-            rates: INITIAL_BANK_RATES,
-            // earnings: Default::default(),
             // Start on ID 1 for nice mapping to line numbers
             next_id: 1,
+            rates: INITIAL_BANK_RATES,
+            asset_info,
             auth: Default::default(),
             balance: Default::default(),
             order: Default::default(),
             withdrawal: Default::default(),
-            asset_info,
+            shared_account: shared_account::SharedTracker::init()
         }
     }
 }
@@ -547,6 +575,28 @@ impl State {
     pub fn get_bankers(&self) -> HashSet<PlayerId> { self.auth.get_bankers() }
     /// Returns true if the given player is an banker
     pub fn is_banker(&self, player: &PlayerId) -> bool { self.auth.is_banker(player) }
+    /// Check if the given action is allowed for a shared account
+    pub fn shared_allowed(action: &Action) -> bool {
+        match action {
+            // Share accounts need to be able to get coins
+            Action::BuyCoins { .. } |
+            Action::SellCoins { .. } |
+            // Shared accounts should be able to place orders, so that organisations can bulk buy/sell
+            Action::BuyOrder { .. } |
+            Action::SellOrder { .. } |
+            Action::CancelOrder { .. } |
+            // Shared accounts need to be able to move stuff in and out so that they actually do something
+            Action::TransferCoins { .. } |
+            Action::TransferAsset { .. } |
+            // Shared accounts can direct other shared accounts
+            Action::Propose { .. } |
+            Action::Agree { .. } |
+            Action::Disagree { .. }
+                => true,
+
+            _ => false
+        }
+    }
     /// Get the required permissions for a given action
     pub fn perms(&self, action: &Action) -> Result<ActionPermissions> {
         match action {
@@ -566,11 +616,24 @@ impl State {
             Action::SellOrder { player, .. } |
             Action::TransferAsset { payer: player, .. } |
             Action::TransferCoins { payer: player, .. } |
-            Action::WithdrawalRequested { player, .. }
+            Action::WithdrawalRequested { player, .. } |
+            Action::Agree { player, .. } |
+            Action::Disagree { player, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Normal, player: player.clone()}),
 
             Action::CancelOrder { target } =>
-                Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target)?.player.clone()})
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: self.order.get_order(*target)?.player.clone()}),
+
+            Action::Propose { proposer, action } => {
+                let perms = self.perms(action)?;
+                Ok(ActionPermissions{player: proposer.clone(), level: perms.level})
+            },
+
+            Action::WindUp { account, .. } =>
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: account.clone().into()}),
+
+            Action::CreateOrUpdateShared { name, .. } =>
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: name.parent().ok_or(Error::InvalidSharedId)?.into()})
         }
     }
     /// Nice macro for checking whether a player is a banker
@@ -771,39 +834,51 @@ impl State {
                 self.auth.update_bankers(FromIterator::from_iter(bankers));
                 Ok(())
             },
-            /*
-            Action::InstantConvert { from, to, count, player } => {
-                // BUG: will fail audit
-                // Check convertable
-                if self.convertables.contains(&(from.clone(), to.clone())) {
-                    return Err(Error::NotConvertable { from, to });
+            Action::CreateOrUpdateShared { name, owners, min_difference, min_votes  } => {
+                self.shared_account.create_or_update(name, owners.into_iter().collect(), min_difference, min_votes)
+            },
+            Action::Propose { action, proposer } => {
+                let target: SharedId = self.perms(action.as_ref())?.player.try_into().map_err(|_| Error::InvalidSharedId)?;
+                // We have to manually check whether this player is allowed to make a proposal, as only the agree/disagree functions chec
+                if !self.shared_account.is_owner(&target, &proposer)? {
+                    return Err(Error::UnauthorisedShared)
                 }
-                // Calculate the fee
-                let min_stack_size = self.asset_info(&from)?.stack_size.min(self.asset_info(&to)?.stack_size);
-                let n_stacks = count.div_ceil(min_stack_size);
-                let fee = n_stacks * self.fees.instant_smelt_per_stack;
-
-                // Check to see if they can afford the fees
-                self.balance.check_coin_removal(&player, fee)?;
-                // Check to see if they can afford the assets
-                self.balance.check_asset_removal(&player, &from, count)?;
-                // Check to see if we can lend this out, and if so, do everything
-                self.investment.try_mark_busy(&to, count)?;
-                self.investment.mark_confirmed(&player, &to, count);
-                self.balance.commit_asset_removal(&player, &from, count).expect("Unable to commit asset removal after check");
-                self.balance.commit_coin_removal(&player, count).expect("Unable to commit coin removal after check");
-                // Distribute the fee
-                self.distribute_profit(&to, fee);
-
-                // Give the assets
-                self.balance.commit_asset_add(&player, &to, count);
-
+                self.shared_account.add_proposal(id, target, *action)?;
+                // The player agrees to their own proposal.
+                //
+                // We then process it if it immediately passes
+                if let Some(action) = self.shared_account.vote(id, proposer, true)? {
+                    self.apply_inner(id, action)?
+                }
                 Ok(())
+            },
+            Action::Disagree { player, proposal_id } => {
+                if let Some(action) = self.shared_account.vote(proposal_id, player, false)? {
+                    self.apply_inner(id, action)?
+                }
+                Ok(())
+            },
+            Action::Agree { player, proposal_id } => {
+                if let Some(action) = self.shared_account.vote(proposal_id, player, true)? {
+                    self.apply_inner(id, action)?
+                }
+                Ok(())
+            },
+            Action::WindUp { account } => {
+                let parent = account.parent().ok_or(Error::InvalidSharedId)?;
+                // Move all the assets to the parent
+                let assets = self.balance.get_assets(account.as_ref());
+                for (asset, count) in assets {
+                    self.balance.commit_asset_removal(account.as_ref(), &asset, count).expect("Failed to remove assets in windup");
+                    self.balance.commit_asset_add(parent.as_ref(), &asset, count);
+                }
+                // Move all the coins to the parent
+                let coins = self.balance.get_bal(account.as_ref());
+                self.balance.commit_coin_removal(account.as_ref(), coins).expect("Failed to remove coins in windup");
+                self.balance.commit_coin_add(parent.as_ref(), coins);
+                // Close the shared account
+                self.shared_account.close(&account)
             }
-            Action::UpdateConvertables { convertables, .. } => {
-                self.convertables = convertables.into_iter().collect();
-                Ok(())
-            } */
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append
@@ -880,7 +955,8 @@ pub struct StateSync {
     pub auth: AuthSync,
     // pub investment: InvestmentSync,
     pub order: OrderSync,
-    pub withdrawal: WithdrawalSync
+    pub withdrawal: WithdrawalSync,
+    pub shared_account: SharedSync
 }
 impl From<&State> for StateSync {
     fn from(value: &State) -> Self {
@@ -891,6 +967,7 @@ impl From<&State> for StateSync {
             auth: (&value.auth).into(),
             order: (&value.order).into(),
             withdrawal: (&value.withdrawal).into(),
+            shared_account: (&value.shared_account).into()
         }
     }
 }
@@ -905,6 +982,7 @@ impl TryFrom<StateSync> for State {
             order: value.order.try_into()?,
             withdrawal: value.withdrawal.try_into()?,
             auth: value.auth.try_into()?,
+            shared_account: value.shared_account.try_into()?,
         })
     }
 }

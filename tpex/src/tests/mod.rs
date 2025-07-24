@@ -936,3 +936,42 @@ async fn reload_state() {
     loaded_state.replay(&mut log.as_ref(), true).await.expect("Failed to replay saved state");
     assert_eq!(StateSync::from(&loaded_state), StateSync::from(&state));
 }
+
+#[test]
+fn fuzz_shared_id() {
+    let bank = SharedId::the_bank();
+    let (mut parent, name) = bank.take_name();
+    assert_eq!(parent.next(), None, "Root had parent");
+    assert_eq!(name, "", "Bank had non-empty name");
+
+    SharedId::try_from(PlayerId::assume_username_correct("foo".to_owned())).expect_err("Invalid SharedId got through");
+    SharedId::try_from(PlayerId::assume_username_correct("foo/".to_owned())).expect_err("Invalid SharedId got through");
+    SharedId::try_from(PlayerId::assume_username_correct("/foo/".to_owned())).expect_err("Invalid SharedId got through");
+
+    let single = SharedId::try_from(PlayerId::assume_username_correct("/foo".to_owned())).expect("Could not parse valid SharedId");
+    let (parent, name) = single.take_name();
+    assert_eq!(parent.collect::<Vec<&str>>(), Vec::<&str>::new(), "Somehow had parent in single name");
+    assert_eq!(name, "foo");
+    let multi = SharedId::try_from(PlayerId::assume_username_correct("/foo/bar".to_owned())).expect("Could not parse valid SharedId");
+    let (parent, name) = multi.take_name();
+    assert_eq!(parent.collect::<Vec<_>>(), vec!["foo"]);
+    assert_eq!(name, "bar");
+}
+
+#[tokio::test]
+async fn test_shared() {
+    let mut state = MatchStateWrapper {
+        state: State::new(),
+        sink: WriteSink::default(),
+        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+    };
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: "foo".to_owned(),
+            owners: vec![player(1)],
+            threshold: 1,
+            parent: SharedId::the_bank()
+        },
+        ExpectedState::default()
+    ).await;
+}
