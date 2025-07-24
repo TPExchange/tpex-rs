@@ -34,9 +34,12 @@ impl SharedId {
         }
     }
     pub fn parent(&self) -> Option<SharedId> {
+        if self.0.0.len() == 1 {
+            return None;
+        }
         let last_delim_pos = self.0.0.rfind('/').unwrap();
         if last_delim_pos == 0 {
-            None
+            Some(SharedId::the_bank())
         }
         else {
             Some(SharedId(PlayerId::assume_username_correct(self.0.0[..last_delim_pos].to_string())))
@@ -54,6 +57,10 @@ impl SharedId {
         }
     }
     pub fn is_controlled_by(&self, other: &SharedId) -> bool {
+        // Check to see if it's just the bank
+        if other.0.0.len() == 1 {
+            return true;
+        }
         // Check that it is prefixed by other
         if !self.0.0.starts_with(&other.0.0) {
             return false;
@@ -254,6 +261,10 @@ impl SharedTracker {
         Ok(())
     }
     pub fn is_owner(&self, id: &SharedId, player: &PlayerId) -> Result<bool, crate::Error> {
+        // For directly proxied companies
+        if player == &id.0 {
+            return Ok(true)
+        }
         self.bank.get(id.parts())
             .ok_or(crate::Error::InvalidSharedId)
             .map(|account| account.owners.contains(player))
@@ -326,6 +337,9 @@ impl SharedTracker {
         // Remove the proposals
         self.proposals.retain(|_, proposal| !to_remove.contains(&proposal.target));
         Ok(())
+    }
+    pub fn contains(&self, id: &SharedId) -> bool {
+        self.bank.get(id.parts()).is_some()
     }
 }
 

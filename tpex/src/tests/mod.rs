@@ -208,10 +208,10 @@ impl<Players, Sink: tokio::io::AsyncWrite + std::marker::Unpin> MatchStateWrappe
         self.state.hard_audit();
         let mut expected_bals = before_bals.clone();
         for (p, gain) in expected.coins_appeared {
-            expected_bals.entry(p).or_default().checked_add_assign(gain).expect("Coins bought overflowed");
+            expected_bals.entry(p).or_default().checked_add_assign(gain).expect("Coins appeared overflowed");
         }
         for (p, loss) in expected.coins_disappeared {
-            expected_bals.entry(p).or_default().checked_sub_assign(loss).expect("Coins sold underflowed");
+            expected_bals.entry(p).or_default().checked_sub_assign(loss).expect("Coins disappeared underflowed");
         }
         for (p, gain) in expected.sell_profit {
             let buy_fee = gain.fee_ppm(self.state.rates.buy_order_ppm).unwrap();
@@ -249,7 +249,7 @@ impl<Players, Sink: tokio::io::AsyncWrite + std::marker::Unpin> MatchStateWrappe
         let mut after_bals = self.state.get_bals();
         expected_bals.retain(|_, &mut j| !j.is_zero());
         after_bals.retain(|_, j| !j.is_zero());
-        assert_eq!(after_bals, expected_bals, "Started at {before_bals:?}");
+        assert_eq!(after_bals, expected_bals, "Started at {before_bals:?} (after != expected)");
         let result_assets: std::collections::HashMap<_, _, std::hash::RandomState> =
             (&self.players).into_iter()
             .map(|i| (i.clone(), self.state.get_assets(i)))
@@ -955,6 +955,7 @@ fn fuzz_shared_id() {
     let (parent, name) = single.take_name();
     assert_eq!(parent.collect::<Vec<&str>>(), Vec::<&str>::new(), "Somehow had parent in single name");
     assert_eq!(name, "foo");
+    assert_eq!(single.parent(), Some(SharedId::the_bank()));
     let multi = SharedId::try_from(PlayerId::assume_username_correct("/foo/bar".to_owned())).expect("Could not parse valid SharedId");
     let (parent, name) = multi.take_name();
     assert_eq!(parent.collect::<Vec<_>>(), vec!["foo"]);
@@ -1088,7 +1089,23 @@ async fn test_shared() {
                 payee: player(1),
                 count: Coins::from_coins(1000)
             }),
-            proposer: player(1)
+            proposer: player(1),
+            target: shared_name.clone(),
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::TransferCoins {
+                payer: shared_name2.clone().into(),
+                payee: player(1),
+                count: Coins::from_coins(1000)
+            }),
+            proposer: player(1),
+            target: shared_name2.clone(),
         },
         ExpectedState {
             should_fail: true,
@@ -1103,7 +1120,8 @@ async fn test_shared() {
                 payee: player(3),
                 count: Coins::from_coins(10)
             }),
-            proposer: player(1)
+            proposer: player(1),
+            target: shared_name.clone(),
         },
         ExpectedState {
             coins_appeared: vec![(player(3), Coins::from_coins(10))],
@@ -1131,7 +1149,8 @@ async fn test_shared() {
                 payee: player(3),
                 count: Coins::from_coins(10)
             }),
-            proposer: player(1)
+            proposer: player(1),
+            target: shared_name.clone(),
         },
         ExpectedState {
             coins_appeared: vec![(player(3), Coins::from_coins(10))],
@@ -1159,7 +1178,8 @@ async fn test_shared() {
                 payee: player(3),
                 count: Coins::from_coins(10)
             }),
-            proposer: player(1)
+            proposer: player(1),
+            target: shared_name.clone(),
         },
         ExpectedState {
             ..Default::default()
@@ -1186,7 +1206,8 @@ async fn test_shared() {
                 min_difference: 2,
                 min_votes: 2
             }),
-            proposer: player(2)
+            proposer: player(2),
+            target: shared_name.clone(),
         },
         ExpectedState {
             ..Default::default()
@@ -1223,7 +1244,8 @@ async fn test_shared() {
                 min_difference: 1,
                 min_votes: 2
             }),
-            proposer: player(1)
+            proposer: player(1),
+            target: shared_name.clone(),
         },
         ExpectedState {
             ..Default::default()
@@ -1241,4 +1263,113 @@ async fn test_shared() {
     ).await;
     assert_eq!(StateSync::from(&state.state).shared_account.proposals[&proposal3].agree, [player(1)].into_iter().collect());
     assert_eq!(StateSync::from(&state.state).shared_account.proposals[&proposal3].disagree, [player(2)].into_iter().collect());
+    // They both agree to make a new subcompany for player 3, but mess up by making it a direct child of /
+    state.assert_state(
+        Action::Propose {
+            proposer: player(1),
+            action: Box::new(Action::CreateOrUpdateShared {
+                name: "/bar".parse().unwrap(),
+                owners: vec![player(3)],
+                min_difference: 1,
+                min_votes: 1
+            }),
+            target: "/foo".parse().unwrap()
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    // They do it properly this time
+    let child_name: SharedId = "/foo/bar".parse().unwrap();
+    let proposal4 = state.assert_state(
+        Action::Propose {
+            proposer: player(1),
+            action: Box::new(Action::CreateOrUpdateShared {
+                name: child_name.clone(),
+                owners: vec![player(3)],
+                min_difference: 1,
+                min_votes: 1
+            }),
+            target: "/foo".parse().unwrap()
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    state.assert_state(
+        Action::Agree {
+            player: player(2),
+            proposal_id: proposal4
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    let proposal5 = state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::TransferCoins {
+                payer: shared_name.clone().into(),
+                payee: child_name.clone().into(),
+                count: Coins::from_coins(2)
+            }),
+            proposer: player(2),
+            target: shared_name.clone()
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    state.assert_state(
+        Action::Agree {
+            player: player(1),
+            proposal_id: proposal5
+        },
+        ExpectedState {
+            coins_appeared: vec![(child_name.clone().into(), Coins::from_coins(2))],
+            coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(2))],
+            ..Default::default()
+        }
+    ).await;
+    // They decide they want those coins back
+    let proposal6 = state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::TransferCoins {
+                payer: child_name.clone().into(),
+                payee: shared_name.clone().into(),
+                count: Coins::from_coins(1)
+            }),
+            proposer: player(2),
+            target: shared_name.clone()
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    state.assert_state(
+        Action::Agree {
+            player: player(1),
+            proposal_id: proposal6
+        },
+        ExpectedState {
+            coins_appeared: vec![(shared_name.clone().into(), Coins::from_coins(1))],
+            coins_disappeared: vec![(child_name.clone().into(), Coins::from_coins(1))],
+            ..Default::default()
+        }
+    ).await;
+    // The bank winds up the company
+    state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::WindUp {
+                account: shared_name.clone()
+            }),
+            proposer: PlayerId::the_bank(),
+            target: SharedId::the_bank()
+        },
+        ExpectedState {
+            coins_appeared: vec![(PlayerId::the_bank(), Coins::from_coins(1970))],
+            coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(1969)), (child_name.clone().into(), Coins::from_coins(1))],
+            ..Default::default()
+        }
+    ).await;
 }
