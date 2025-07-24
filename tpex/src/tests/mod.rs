@@ -2,6 +2,8 @@
 
 use std::{collections::{BTreeMap, HashMap}, fmt::Display};
 
+use crate::shared_account::Proposal;
+
 use super::*;
 
 #[derive(Default)]
@@ -943,6 +945,7 @@ fn fuzz_shared_id() {
     let (mut parent, name) = bank.take_name();
     assert_eq!(parent.next(), None, "Root had parent");
     assert_eq!(name, "", "Bank had non-empty name");
+    assert_eq!(bank.parts().collect::<Vec<&str>>(), Vec::<&str>::new(), "Bank had parts");
 
     SharedId::try_from(PlayerId::assume_username_correct("foo".to_owned())).expect_err("Invalid SharedId got through");
     SharedId::try_from(PlayerId::assume_username_correct("foo/".to_owned())).expect_err("Invalid SharedId got through");
@@ -956,6 +959,7 @@ fn fuzz_shared_id() {
     let (parent, name) = multi.take_name();
     assert_eq!(parent.collect::<Vec<_>>(), vec!["foo"]);
     assert_eq!(name, "bar");
+
 }
 
 #[tokio::test]
@@ -965,13 +969,276 @@ async fn test_shared() {
         sink: WriteSink::default(),
         players: [player(1), player(2), player(3), PlayerId::the_bank()]
     };
+    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
+    // Try with invalid consensus
     state.assert_state(
         Action::CreateOrUpdateShared {
-            name: "foo".to_owned(),
+            name: shared_name.clone(),
             owners: vec![player(1)],
-            threshold: 1,
-            parent: SharedId::the_bank()
+            min_difference: 1,
+            min_votes: 2
         },
-        ExpectedState::default()
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
     ).await;
+    let shared_name2: SharedId = "/foo2".parse().expect("Could not parse name");
+    // Try with invalid consensus
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: shared_name.clone(),
+            owners: vec![player(2)],
+            min_difference: 1,
+            min_votes: 2,
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: shared_name.clone(),
+            owners: vec![player(1)],
+            min_difference: 2,
+            min_votes: 2
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    // Try it properly
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: shared_name.clone(),
+            owners: vec![player(1)],
+            min_difference: 1,
+            min_votes: 1
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    // Try to give it invalid consensus after founding
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: shared_name.clone(),
+            owners: vec![player(1)],
+            min_difference: 2,
+            min_votes: 2
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::Deposit {
+            player: player(1),
+            asset: "diamond".into(),
+            count: 16,
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState {
+            assets: vec![(player(1), "diamond".into(), 16)],
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::BuyCoins {
+            player: player(1),
+            n_diamonds: 16
+        },
+        ExpectedState {
+            diamonds_sold: vec![(player(1), 16)],
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::TransferCoins {
+            payer: player(1),
+            payee: shared_name.clone().into(),
+            count: Coins::from_coins(2000),
+        },
+        ExpectedState {
+            coins_appeared: vec![(shared_name.clone().into(), Coins::from_coins(2000))],
+            coins_disappeared: vec![(player(1), Coins::from_coins(2000))],
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::TransferCoins {
+            payer: player(1),
+            payee: shared_name2.clone().into(),
+            count: Coins::from_coins(2000),
+        },
+        ExpectedState {
+            coins_appeared: vec![(shared_name2.clone().into(), Coins::from_coins(2000))],
+            coins_disappeared: vec![(player(1), Coins::from_coins(2000))],
+            ..Default::default()
+        }
+    ).await;
+    // Try to steal coins
+    state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::TransferCoins {
+                payer: shared_name2.clone().into(),
+                payee: player(1),
+                count: Coins::from_coins(1000)
+            }),
+            proposer: player(1)
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    // Propose (and immediately pass) transferring coins to player 3
+    state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::TransferCoins {
+                payer: shared_name.clone().into(),
+                payee: player(3),
+                count: Coins::from_coins(10)
+            }),
+            proposer: player(1)
+        },
+        ExpectedState {
+            coins_appeared: vec![(player(3), Coins::from_coins(10))],
+            coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(10))],
+            ..Default::default()
+        }
+    ).await;
+    // Update the shared account with another player, but the same thesholds
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: shared_name.clone(),
+            owners: vec![player(1), player(2)],
+            min_difference: 1,
+            min_votes: 1
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    // Propose (and immediately pass) transferring coins to player 3 again
+    state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::TransferCoins {
+                payer: shared_name.clone().into(),
+                payee: player(3),
+                count: Coins::from_coins(10)
+            }),
+            proposer: player(1)
+        },
+        ExpectedState {
+            coins_appeared: vec![(player(3), Coins::from_coins(10))],
+            coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(10))],
+            ..Default::default()
+        }
+    ).await;
+    // Update the shared account to require both players to vote, but only need at least 50% to agree
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: shared_name.clone(),
+            owners: vec![player(1), player(2)],
+            min_difference: 0,
+            min_votes: 2
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    // Propose transferring coins to player 3 yet again
+    let proposal1 = state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::TransferCoins {
+                payer: shared_name.clone().into(),
+                payee: player(3),
+                count: Coins::from_coins(10)
+            }),
+            proposer: player(1)
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    // Player 2 doesn't like this, but their vote hits the notice threshold
+    state.assert_state(
+        Action::Disagree {
+            player: player(2),
+            proposal_id: proposal1
+        },
+        ExpectedState {
+            coins_appeared: vec![(player(3), Coins::from_coins(10))],
+            coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(10))],
+            ..Default::default()
+        }
+    ).await;
+    // Player 2 is done with this
+    let proposal2 = state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::CreateOrUpdateShared {
+                name: shared_name.clone(),
+                owners: vec![player(1), player(2)],
+                min_difference: 2,
+                min_votes: 2
+            }),
+            proposer: player(2)
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    // Player 1 thinks it's working fine
+    state.assert_state(
+        Action::Disagree {
+            player: player(1),
+            proposal_id: proposal2
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    assert_eq!(StateSync::from(&state.state).shared_account.proposals.into_iter().collect::<Vec<(u64, Proposal)>>(), Vec::<(u64, Proposal)>::new());
+    // Player 1 tries to vote again
+    state.assert_state(
+        Action::Disagree {
+            player: player(1),
+            proposal_id: proposal2
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    // Player 1 wants it back the way it was
+    let proposal3 = state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::CreateOrUpdateShared {
+                name: shared_name.clone(),
+                owners: vec![player(1), player(2)],
+                min_difference: 1,
+                min_votes: 2
+            }),
+            proposer: player(1)
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    // Player 2 disagrees
+    state.assert_state(
+        Action::Disagree {
+            player: player(2),
+            proposal_id: proposal3
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    assert_eq!(StateSync::from(&state.state).shared_account.proposals[&proposal3].agree, [player(1)].into_iter().collect());
+    assert_eq!(StateSync::from(&state.state).shared_account.proposals[&proposal3].disagree, [player(2)].into_iter().collect());
 }
