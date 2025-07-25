@@ -169,8 +169,6 @@ pub enum Action {
     UpdateRestricted {
         /// The new list of assets that are restricted
         restricted_assets: Vec<AssetId>,
-        /// The banker who submitted this restriction
-        banker: PlayerId,
     },
     /// Allows a player to place new withdrawal requests up to new_count of an item
     ///
@@ -178,8 +176,6 @@ pub enum Action {
     AuthoriseRestricted {
         /// The player whose authorisation is being adjusted
         authorisee: PlayerId,
-        /// The banker who submitted this authorisation
-        banker: PlayerId,
         /// The asset that should be authorised
         asset: AssetId,
         /// The new maximum amount this player can withdraw
@@ -189,8 +185,6 @@ pub enum Action {
     UpdateBankRates {
         #[serde(flatten)]
         rates: BankRates,
-        /// The banker who submitted this update
-        banker: PlayerId,
     },
     /// A transfer of coins from one player to another, no strings attached
     TransferCoins {
@@ -216,13 +210,6 @@ pub enum Action {
     CancelOrder {
         /// The transaction ID of the order to cancel
         target: u64
-    },
-    /// Update the list of bankers to the given list
-    UpdateBankers {
-        /// The new list of bankers
-        bankers: Vec<PlayerId>,
-        /// The banker who submitted this update
-        banker: PlayerId,
     },
     /// Used to correct typos
     Undeposit {
@@ -574,40 +561,19 @@ impl State {
     /// Lists all restricted items
     pub fn get_restricted(&self) -> impl IntoIterator<Item = &AssetId> { self.auth.get_restricted() }
     /// Gets a list of all bankers
-    pub fn get_bankers(&self) -> HashSet<PlayerId> { self.auth.get_bankers() }
+    pub fn get_bankers(&self) -> &HashSet<PlayerId> { self.shared_account.the_bank().owners() }
     /// Returns true if the given player is an banker
-    pub fn is_banker(&self, player: &PlayerId) -> bool { self.auth.is_banker(player) }
-    /// Check if the given action is allowed for a shared account
-    pub fn shared_allowed(action: &Action) -> bool {
-        match action {
-            // Share accounts need to be able to get coins
-            Action::BuyCoins { .. } |
-            Action::SellCoins { .. } |
-            // Shared accounts should be able to place orders, so that organisations can bulk buy/sell
-            Action::BuyOrder { .. } |
-            Action::SellOrder { .. } |
-            Action::CancelOrder { .. } |
-            // Shared accounts need to be able to move stuff in and out so that they actually do something
-            Action::TransferCoins { .. } |
-            Action::TransferAsset { .. } |
-            // Shared accounts can direct other shared accounts
-            Action::Propose { .. } |
-            Action::Agree { .. } |
-            Action::Disagree { .. }
-                => true,
-
-            _ => false
-        }
-    }
+    pub fn is_banker(&self, player: &PlayerId) -> bool { self.shared_account.the_bank().owners().contains(player) }
     /// Get the required permissions for a given action
     pub fn perms(&self, action: &Action) -> Result<ActionPermissions> {
         match action {
-            Action::AuthoriseRestricted { banker, .. } |
+            Action::AuthoriseRestricted { .. } |
+            Action::UpdateBankRates { .. } |
+            Action::UpdateRestricted { .. }
+                => Ok(ActionPermissions { level: ActionLevel::Banker, player: PlayerId::the_bank() }),
+
             Action::Deleted { banker, .. } |
             Action::Deposit { banker, .. } |
-            Action::UpdateBankRates { banker, .. } |
-            Action::UpdateBankers { banker, .. } |
-            Action::UpdateRestricted { banker, .. } |
             Action::WithdrawalCompleted { banker, .. } |
             Action::Undeposit { banker, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
@@ -643,7 +609,7 @@ impl State {
     }
     /// Nice macro for checking whether a player is a banker
     fn check_banker(&self, player: &PlayerId) -> Result<()> {
-        if self.auth.is_banker(player) {
+        if self.is_banker(player) {
             Ok(())
         }
         else {
@@ -780,8 +746,7 @@ impl State {
                 self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds);
                 Ok(())
             },
-            Action::UpdateRestricted { restricted_assets , banker} => {
-                self.check_banker(&banker)?;
+            Action::UpdateRestricted { restricted_assets} => {
                 // Check they're valid assets
                 if let Some(asset) =
                     restricted_assets.iter()
@@ -802,8 +767,7 @@ impl State {
                 }
                 Ok(())
             },
-            Action::AuthoriseRestricted { authorisee, asset, new_count, banker } => {
-                self.check_banker(&banker)?;
+            Action::AuthoriseRestricted { authorisee, asset, new_count } => {
                 // Check it's a valid asset (not necessarily authorisable to enable pre-authorisation)
                 if !self.asset_info.contains_key(&asset) {
                     return Err(Error::UnknownAsset { asset });
@@ -811,9 +775,7 @@ impl State {
                 self.auth.set_authorisation(authorisee, asset, new_count);
                 Ok(())
             },
-            Action::UpdateBankRates { rates , banker } => {
-                // Check that the banker is actually a banker
-                self.check_banker(&banker)?;
+            Action::UpdateBankRates { rates } => {
                 // Check they're consistent
                 rates.check()?;
                 // Set the rates
@@ -832,11 +794,6 @@ impl State {
                 self.balance.commit_asset_removal(&payer, &asset, count)?;
                 // ... and give it to payee
                 self.balance.commit_asset_add(&payee,  &asset, count);
-                Ok(())
-            },
-            Action::UpdateBankers { bankers, banker } => {
-                self.check_banker(&banker)?;
-                self.auth.update_bankers(FromIterator::from_iter(bankers));
                 Ok(())
             },
             Action::CreateOrUpdateShared { name, owners, min_difference, min_votes  } => {
