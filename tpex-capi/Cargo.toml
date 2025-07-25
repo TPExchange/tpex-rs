@@ -7,6 +7,6 @@ edition = "2024"
 crate-type=["cdylib"]
 
 [dependencies]
-tpex = { path = "../tpex", version = "^0.4.0" }
+tpex = { path = "../tpex", version = "^0.5.0" }
 [build-dependencies]
 cbindgen = "^0.29.0"
