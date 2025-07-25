@@ -682,7 +682,6 @@ async fn authorisations() {
     state.assert_state(
         Action::UpdateRestricted {
             restricted_assets: vec![unauthed.clone()],
-            banker: PlayerId::the_bank()
         },
         ExpectedState {
             assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 100)],
@@ -729,7 +728,6 @@ async fn authorisations() {
     state.assert_state(
         Action::AuthoriseRestricted {
             authorisee: player(2),
-            banker: PlayerId::the_bank(),
             asset: unauthed.clone(),
             new_count: 1
         },
@@ -777,7 +775,6 @@ async fn authorisations() {
     state.assert_state(
         Action::UpdateRestricted {
             restricted_assets: Vec::new(),
-            banker: PlayerId::the_bank()
         },
         ExpectedState {
             assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
@@ -807,31 +804,28 @@ async fn update_bankers() {
     assert!(!state.state.is_banker(&player(1)));
     println!("Replacing default banker");
     state.assert_state(
-        Action::UpdateBankers {
-            bankers: vec![player(1), player(3)],
-            banker: PlayerId::the_bank()
+        Action::CreateOrUpdateShared {
+            name: SharedId::the_bank(),
+            owners: vec![player(1), player(3)],
+            min_difference: 1,
+            min_votes: 1,
         },
         ExpectedState {
             ..Default::default()
         }
     ).await;
-    assert_eq!(state.state.get_bankers(), [player(1), player(3)].into());
+    assert_eq!(state.state.get_bankers(), &[player(1), player(3)].into());
     println!("Trying to update bankers as non-banker");
     state.assert_state(
-        Action::UpdateBankers {
-            bankers: vec![player(1), player(3)],
-            banker: player(2)
-        },
-        ExpectedState {
-            should_fail: true,
-            ..Default::default()
-        }
-    ).await;
-    println!("Trying to update bankers as ex-banker");
-    state.assert_state(
-        Action::UpdateBankers {
-            bankers: vec![player(1), player(3)],
-            banker: PlayerId::the_bank()
+        Action::Propose {
+            action: Box::new(Action::CreateOrUpdateShared {
+                name: SharedId::the_bank(),
+                owners: vec![player(1), player(3)],
+                min_difference: 1,
+                min_votes: 1,
+            }),
+            target: SharedId::the_bank(),
+            proposer: player(2)
         },
         ExpectedState {
             should_fail: true,
@@ -941,23 +935,20 @@ async fn reload_state() {
 
 #[test]
 fn fuzz_shared_id() {
-    let bank = SharedId::the_bank();
-    let (mut parent, name) = bank.take_name();
-    assert_eq!(parent.next(), None, "Root had parent");
-    assert_eq!(name, "", "Bank had non-empty name");
-    assert_eq!(bank.parts().collect::<Vec<&str>>(), Vec::<&str>::new(), "Bank had parts");
+    assert!(SharedId::the_bank().take_name().is_none());
+    assert_eq!(SharedId::the_bank().parts().collect::<Vec<&str>>(), Vec::<&str>::new(), "Bank had parts");
 
     SharedId::try_from(PlayerId::assume_username_correct("foo".to_owned())).expect_err("Invalid SharedId got through");
     SharedId::try_from(PlayerId::assume_username_correct("foo/".to_owned())).expect_err("Invalid SharedId got through");
     SharedId::try_from(PlayerId::assume_username_correct("/foo/".to_owned())).expect_err("Invalid SharedId got through");
 
     let single = SharedId::try_from(PlayerId::assume_username_correct("/foo".to_owned())).expect("Could not parse valid SharedId");
-    let (parent, name) = single.take_name();
+    let (parent, name) = single.take_name().expect("Single name didn't have a name");
     assert_eq!(parent.collect::<Vec<&str>>(), Vec::<&str>::new(), "Somehow had parent in single name");
     assert_eq!(name, "foo");
     assert_eq!(single.parent(), Some(SharedId::the_bank()));
     let multi = SharedId::try_from(PlayerId::assume_username_correct("/foo/bar".to_owned())).expect("Could not parse valid SharedId");
-    let (parent, name) = multi.take_name();
+    let (parent, name) = multi.take_name().expect("Multi name didn't have a name");
     assert_eq!(parent.collect::<Vec<_>>(), vec!["foo"]);
     assert_eq!(name, "bar");
 
@@ -1357,6 +1348,8 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await;
+    let fs = StateSync::from(&state.state);
+    assert_eq!(fs.shared_account.bank.children().keys().cloned().collect::<Vec<String>>(), vec!["foo".to_owned()]);
     // The bank winds up the company
     state.assert_state(
         Action::Propose {

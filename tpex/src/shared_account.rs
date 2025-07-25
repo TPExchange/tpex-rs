@@ -14,9 +14,12 @@ impl SharedId {
     pub fn the_bank() -> SharedId { PlayerId::the_bank().try_into().unwrap() }
 }
 impl SharedId {
+    pub const fn is_bank(&self) -> bool {
+        self.0.0.len() == 1
+    }
     pub fn parts(&self) -> impl DoubleEndedIterator<Item = &str> {
         // If this is the bank, there are no parts
-        if self.0.0.len() == 1 {
+        if self.is_bank() {
             None.into_iter().flatten()
         }
         else {
@@ -24,17 +27,20 @@ impl SharedId {
             Some(self.0.0[1..].split('/')).into_iter().flatten()
         }
     }
-    pub fn take_name(&self) -> (impl DoubleEndedIterator<Item = &str>, &str) {
+    pub fn take_name(&self) -> Option<(impl DoubleEndedIterator<Item = &str>, &str)> {
+        if self.is_bank() {
+            return None
+        }
         let last_delim_pos = self.0.0.rfind('/').unwrap();
         if last_delim_pos == 0 {
-            (None.into_iter().flatten(), &self.0.0[last_delim_pos+1..])
+            Some((None.into_iter().flatten(), &self.0.0[last_delim_pos+1..]))
         }
         else {
-            (Some(self.0.0[1..last_delim_pos].split('/')).into_iter().flatten(), &self.0.0[last_delim_pos+1..])
+            Some((Some(self.0.0[1..last_delim_pos].split('/')).into_iter().flatten(), &self.0.0[last_delim_pos+1..]))
         }
     }
     pub fn parent(&self) -> Option<SharedId> {
-        if self.0.0.len() == 1 {
+        if self.is_bank() {
             return None;
         }
         let last_delim_pos = self.0.0.rfind('/').unwrap();
@@ -244,20 +250,26 @@ impl SharedTracker {
         {
             return Err(crate::Error::InvalidThreshold);
         }
-        let (parent, name) = id.take_name();
-        // Look up the shared account's position in the tree
-        match self.bank.get_mut(parent).ok_or(crate::Error::InvalidSharedId)?.children.entry(name.to_string()) {
-            // If it exists, we edit the values
-            std::collections::hash_map::Entry::Occupied(mut occupied_entry) => {
-                let occupied_entry = occupied_entry.get_mut();
-                occupied_entry.owners = owners;
-                occupied_entry.min_difference = min_difference;
-                occupied_entry.min_votes = min_votes;
-            },
-            std::collections::hash_map::Entry::Vacant(vacant_entry) => {
-                vacant_entry.insert(SharedAccount::new(owners, min_difference, min_votes, Default::default())?);
+        let target: &mut SharedAccount = match id.take_name() {
+            Some((parent, name)) => {
+                // Look up the shared account's position in the tree
+                match self.bank.get_mut(parent).ok_or(crate::Error::InvalidSharedId)?.children.entry(name.to_string()) {
+                    // If it exists, we edit the values
+                    std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                        occupied_entry.into_mut()
+                    },
+                    std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(SharedAccount::new(owners, min_difference, min_votes, Default::default())?);
+                        return Ok(())
+                    }
+                }
             }
-        }
+            // If this is the root, return the root
+            None => &mut self.bank
+        };
+        target.owners = owners;
+        target.min_difference = min_difference;
+        target.min_votes = min_votes;
         Ok(())
     }
     pub fn is_owner(&self, id: &SharedId, player: &PlayerId) -> Result<bool, crate::Error> {
@@ -320,12 +332,10 @@ impl SharedTracker {
         Ok(None)
     }
     pub fn wind_up(&mut self, id: SharedId, mut clean_one: impl FnMut(&SharedId)) -> Result<(), crate::Error> {
-        // You can't wind up the bank, it has no parent and would cause terrible issues!
-        if id == SharedId::the_bank() {
-            return Err(crate::Error::InvalidSharedId)
-        }
         // Get the parent, and remove the child
-        let (parent, name) = id.take_name();
+        let Some((parent, name)) = id.take_name()
+        // You can't wind up the bank, it has cyclic parent and would cause terrible issues!
+        else { return Err(crate::Error::InvalidSharedId) };
         let parent = self.bank.get_mut(parent).ok_or(crate::Error::InvalidSharedId)?;
         let target = parent.children.remove(name).ok_or(crate::Error::InvalidSharedId)?;
         // Grab a list of all the accounts being destroyed
@@ -340,6 +350,9 @@ impl SharedTracker {
     }
     pub fn contains(&self, id: &SharedId) -> bool {
         self.bank.get(id.parts()).is_some()
+    }
+    pub fn the_bank(&self) -> &SharedAccount {
+        &self.bank
     }
 }
 

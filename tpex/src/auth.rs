@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
 
 use crate::{AssetId, Error, PlayerId, Result};
@@ -8,15 +6,13 @@ use crate::{AssetId, Error, PlayerId, Result};
 pub struct AuthSync {
     /// The restricted assets
     pub restricted: std::collections::HashSet<AssetId>,
-    /// The list of current bankers
-    pub bankers: std::collections::HashSet<PlayerId>,
+    /// The authorisations that various players have
     pub authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
 }
 impl From<&AuthTracker> for AuthSync {
     fn from(value: &AuthTracker) -> Self {
         AuthSync {
             restricted: value.restricted.clone(),
-            bankers: value.bankers.clone(),
             authorisations: value.authorisations.clone(),
         }
     }
@@ -27,7 +23,6 @@ impl TryFrom<AuthSync> for AuthTracker {
     fn try_from(value: AuthSync) -> Result<AuthTracker> {
         Ok(AuthTracker {
             restricted: value.restricted,
-            bankers: value.bankers,
             authorisations: value.authorisations
         })
     }
@@ -37,8 +32,7 @@ impl TryFrom<AuthSync> for AuthTracker {
 pub struct AuthTracker {
     /// The restricted assets
     restricted: std::collections::HashSet<AssetId>,
-    /// The list of current bankers
-    bankers: std::collections::HashSet<PlayerId>,
+    /// The authorisations that various players have
     authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
 }
 impl Default for AuthTracker {
@@ -50,7 +44,6 @@ impl AuthTracker {
     pub fn new() -> AuthTracker {
         AuthTracker {
             restricted: Default::default(),
-            bankers: [PlayerId::the_bank()].into_iter().collect(),
             authorisations: Default::default(),
         }
     }
@@ -58,10 +51,6 @@ impl AuthTracker {
     pub fn is_restricted(&self, asset: &AssetId) -> bool { self.restricted.contains(asset) }
     /// Lists all restricted items
     pub fn get_restricted(&self) -> &std::collections::HashSet<AssetId> { &self.restricted }
-    /// Gets a list of all bankers
-    pub fn get_bankers(&self) -> HashSet<PlayerId> { self.bankers.clone() }
-    /// Returns true if the given player is an banker
-    pub fn is_banker(&self, player: &PlayerId) -> bool { self.bankers.contains(player) }
     /// Sets the maximum amount a player is able to withdraw of a restricted item.
     ///
     /// XXX: This can and will nuke existing values, so check those race conditions
@@ -96,10 +85,6 @@ impl AuthTracker {
             }
         }
         self.restricted = restricted;
-    }
-    /// Updates the list of bankers
-    pub fn update_bankers(&mut self, bankers: std::collections::HashSet<PlayerId>) {
-        self.bankers = bankers;
     }
     /// Checks to see if a player can withdraw a certain asset
     pub fn check_withdrawal_authorized(&self, player: &PlayerId, asset: &AssetId, count: u64) -> Result<()> {
