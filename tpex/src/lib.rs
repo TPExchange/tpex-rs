@@ -43,6 +43,7 @@ impl PlayerId {
     /// Gets the internal name of the user
     pub fn get_raw_name(&self) -> &String { &self.0 }
     pub fn the_bank() -> PlayerId { PlayerId("/".to_owned()) }
+    pub fn is_bank(&self) -> bool { self.0 == "/" }
 }
 impl<'de> Deserialize<'de> for PlayerId {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
@@ -563,7 +564,7 @@ impl State {
     /// Gets a list of all bankers
     pub fn get_bankers(&self) -> &HashSet<PlayerId> { self.shared_account.the_bank().owners() }
     /// Returns true if the given player is an banker
-    pub fn is_banker(&self, player: &PlayerId) -> bool { self.shared_account.the_bank().owners().contains(player) }
+    pub fn is_banker(&self, player: &PlayerId) -> bool { player.is_bank() || self.shared_account.the_bank().owners().contains(player) }
     /// Get the required permissions for a given action
     pub fn perms(&self, action: &Action) -> Result<ActionPermissions> {
         match action {

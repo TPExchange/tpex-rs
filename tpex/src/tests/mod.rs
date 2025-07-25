@@ -832,6 +832,22 @@ async fn update_bankers() {
             ..Default::default()
         }
     ).await;
+    println!("Trying to update bankers as a banker");
+    state.assert_state(
+        Action::Propose {
+            action: Box::new(Action::CreateOrUpdateShared {
+                name: SharedId::the_bank(),
+                owners: vec![player(2), player(3)],
+                min_difference: 1,
+                min_votes: 1,
+            }),
+            target: SharedId::the_bank(),
+            proposer: player(1)
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
 }
 
 #[tokio::test]
