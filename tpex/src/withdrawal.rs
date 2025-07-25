@@ -54,7 +54,7 @@ pub struct PendingWithdrawal {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct WithdrawalTracker {
+pub(crate) struct WithdrawalTracker {
     pending_withdrawals: std::collections::BTreeMap<u64, PendingWithdrawal>,
 
     current_audit: Audit

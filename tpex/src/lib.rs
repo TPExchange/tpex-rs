@@ -1,28 +1,28 @@
 use std::{collections::HashSet, ops::{Add, AddAssign}, pin::pin};
 
-use auth::AuthSync;
-use balance::BalanceSync;
-use order::OrderSync;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 // We use a base coins, which represent 1/1000 of a diamond
 use serde::{Deserialize, Serialize};
+
+use auth::AuthSync;
+use balance::BalanceSync;
+use order::OrderSync;
 use withdrawal::WithdrawalSync;
+use crate::shared_account::SharedSync;
 
-use crate::shared_account::{SharedId, SharedSync};
+use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
 
-pub use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
-
-mod balance;
-mod order;
-mod withdrawal;
-mod coins;
-mod auth;
-mod shared_account;
+pub mod balance;
+pub mod order;
+pub mod withdrawal;
+pub mod coins;
+pub mod auth;
+pub mod shared_account;
 mod tests;
 
-pub use order::OrderType;
 pub use coins::Coins;
+pub use shared_account::SharedId;
 
 pub const DIAMOND_NAME: &str = "diamond";
 pub const DIAMOND_RAW_COINS: Coins = Coins::from_coins(1000);
@@ -75,21 +75,6 @@ pub enum ActionLevel {
 pub struct ActionPermissions {
     pub level: ActionLevel,
     pub player: PlayerId
-}
-
-// #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
-// struct Conversion {
-//     from: std::collections::HashMap<AssetId, u64>,
-//     to: std::collections::HashMap<AssetId, u64>
-// }
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
-pub struct AutoConversion {
-    pub from: AssetId,
-    // We don't have n_from, as that would give inconsistent conversion. 1:n only!
-    // pub n_from: u64,
-    pub to: AssetId,
-    pub n_to: u64
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]

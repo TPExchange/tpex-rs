@@ -145,7 +145,7 @@ pub struct PendingOrder {
 }
 
 #[derive(Default)]
-pub struct BuyData {
+pub(crate) struct BuyData {
     // pub coins_refunded: Coins,
     pub cost: Coins,
     pub assets_instant_matched: u64,
@@ -155,18 +155,18 @@ pub struct BuyData {
 }
 
 #[derive(Default)]
-pub struct SellData {
+pub(crate) struct SellData {
     pub coins_instant_earned: Coins,
     pub assets_instant_matched: std::collections::HashMap<PlayerId, u64>,
     pub instant_bank_fee: Coins,
 }
-pub enum CancelResult {
+pub(crate) enum CancelResult {
     BuyOrder{player: PlayerId, refund_coins: Coins},
     SellOrder{player: PlayerId, refunded_asset: AssetId, refund_count: u64}
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
-pub struct OrderTracker {
+pub(crate) struct OrderTracker {
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 
     /// XXX: this contains cancelled orders, skip over them

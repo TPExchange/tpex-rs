@@ -133,15 +133,15 @@ pub struct Order {
     pub is_sell: bool,
     pub fee_ppm: u64,
 }
-impl From<&tpex::PendingOrder> for Order {
-    fn from(value: &tpex::PendingOrder) -> Self {
+impl From<&tpex::order::PendingOrder> for Order {
+    fn from(value: &tpex::order::PendingOrder) -> Self {
         Order {
             id: value.id,
             millicoins_per: value.coins_per.millicoins(),
             player: std::ffi::CString::from_str(value.player.get_raw_name()).expect("Null in username").into_raw(),
             amount_remaining: value.amount_remaining,
             asset: std::ffi::CString::from_str(&value.asset).expect("Null in asset name").into_raw(),
-            is_sell: match value.order_type { tpex::OrderType::Buy => false, tpex::OrderType::Sell => true },
+            is_sell: match value.order_type { tpex::order::OrderType::Buy => false, tpex::order::OrderType::Sell => true },
             fee_ppm: value.fee_ppm,
         }
     }

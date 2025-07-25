@@ -38,7 +38,7 @@ impl TryFrom<BalanceSync> for BalanceTracker {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct BalanceTracker {
+pub(crate) struct BalanceTracker {
     balances: std::collections::HashMap<PlayerId, Coins>,
     assets: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
 

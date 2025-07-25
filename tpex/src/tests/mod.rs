@@ -2,7 +2,7 @@
 
 use std::{collections::{BTreeMap, HashMap}, fmt::Display};
 
-use crate::shared_account::Proposal;
+use crate::{order::OrderType, shared_account::Proposal};
 
 use super::*;
 

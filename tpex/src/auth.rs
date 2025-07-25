@@ -29,7 +29,7 @@ impl TryFrom<AuthSync> for AuthTracker {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct AuthTracker {
+pub(crate) struct AuthTracker {
     /// The restricted assets
     restricted: std::collections::HashSet<AssetId>,
     /// The authorisations that various players have
