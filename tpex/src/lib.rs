@@ -19,10 +19,12 @@ pub mod withdrawal;
 pub mod coins;
 pub mod auth;
 pub mod shared_account;
+pub mod etp;
 mod tests;
 
 pub use coins::Coins;
 pub use shared_account::SharedId;
+pub use etp::ETPId;
 
 pub const DIAMOND_NAME: &str = "diamond";
 pub const DIAMOND_RAW_COINS: Coins = Coins::from_coins(1000);
@@ -65,6 +67,7 @@ impl core::fmt::Display for PlayerId {
         self.0.fmt(f)
     }
 }
+
 pub type AssetId = String;
 
 #[derive(PartialEq, Eq, Debug, PartialOrd, Ord)]
@@ -155,7 +158,7 @@ pub enum Action {
     /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
         /// The new list of assets that are restricted
-        restricted_assets: Vec<AssetId>,
+        restricted_assets: HashSet<AssetId>,
     },
     /// Allows a player to place new withdrawal requests up to new_count of an item
     ///
@@ -252,6 +255,29 @@ pub enum Action {
         /// The shared account to wind up
         account: SharedId,
     },
+    /// Update the list of shared accounts that are allowed to issue exchange traded products
+    ///
+    /// The compliance process should be very tight to ensure low default risk
+    UpdateETPAuthorised {
+        /// The new list of shared accounts
+        accounts: HashSet<SharedId>
+    },
+    /// Issue an exchange traded product to the issuing account
+    Issue {
+        /// The product to be issued
+        product: ETPId,
+        /// The amount of that product, capped to a u32 to make it harder (and more obvious) if someone is doing a funny
+        count: u32
+    },
+    /// Removes some amount of a product from the *issuing* account
+    ///
+    /// This allows redemption by sending the asset to the issuer, who then removes
+    Remove {
+        /// The product to be removed
+        product: ETPId,
+        /// The amount of that product
+        count: u64
+    }
 }
 impl Action {
     fn adjust_audit(&self, mut audit: Audit) -> Option<Audit> {
@@ -262,7 +288,7 @@ impl Action {
             },
             Action::Undeposit { asset, count, .. } => {
                 audit.sub_asset(asset.clone(), *count);
-                Some(audit.clone())
+                Some(audit)
             }
             Action::WithdrawalCompleted{..} => {
                 // We don't know what the withdrawal is just from the id
@@ -273,12 +299,20 @@ impl Action {
             Action::BuyCoins { n_diamonds, .. } => {
                 audit.sub_asset(DIAMOND_NAME.into(), *n_diamonds);
                 audit.add_coins(DIAMOND_RAW_COINS.checked_mul(*n_diamonds).unwrap());
-                Some(audit.clone())
+                Some(audit)
             },
             Action::SellCoins { n_diamonds, .. } => {
                 audit.add_asset(DIAMOND_NAME.into(), *n_diamonds);
                 audit.sub_coins(DIAMOND_RAW_COINS.checked_mul(*n_diamonds).unwrap());
-                Some(audit.clone())
+                Some(audit)
+            },
+            Action::Issue { product, count } => {
+                audit.add_asset(product.into(), *count as u64);
+                Some(audit)
+            },
+            Action::Remove { product, count } => {
+                audit.sub_asset(product.into(), *count);
+                Some(audit)
             },
             _ => Some(audit)
         }
@@ -385,8 +419,10 @@ pub enum Error {
     InvalidFastSync,
     InvalidThreshold,
     InvalidSharedId,
+    InvalidETPId,
     UnauthorisedShared,
-    UnsharedOnly
+    UnsharedOnly,
+    UnauthorisedIssue{account: SharedId},
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -400,7 +436,7 @@ impl std::fmt::Display for Error {
             Error::UnauthorisedWithdrawal { asset, amount_overdrawn } => {
                 match amount_overdrawn {
                     Some(amount_overdrawn) => write!(f, "Player needs authorisation to withdraw {amount_overdrawn} more {asset}."),
-                    None => write!(f, "Player needs authorisation to withdraw {asset}.")
+                    None => write!(f, "Player is not authorised to withdraw {asset}.")
                 }
 
             },
@@ -435,13 +471,19 @@ impl std::fmt::Display for Error {
                 write!(f, "The provided threshold was either unsatisfiable or zero.")
             },
             Error::InvalidSharedId => {
-                write!(f, "The requested action involves a non-existent shared account.")
+                write!(f, "The requested action involves a non-existent or unparsable shared account.")
+            },
+            Error::InvalidETPId => {
+                write!(f, "The provided ETP ID was invalid")
             },
             Error::UnauthorisedShared => {
                 write!(f, "The requested action requires the player to have access to a shared account that they do not.")
             },
             Error::UnsharedOnly => {
                 write!(f, "The requested action can only be performed on an unshared account.")
+            },
+            Error::UnauthorisedIssue { account } => {
+                write!(f, "The account {account} is not authorised to issue ETPs.")
             }
         }
 
@@ -560,7 +602,8 @@ impl State {
         match action {
             Action::AuthoriseRestricted { .. } |
             Action::UpdateBankRates { .. } |
-            Action::UpdateRestricted { .. }
+            Action::UpdateRestricted { .. } |
+            Action::UpdateETPAuthorised { .. }
                 => Ok(ActionPermissions { level: ActionLevel::Banker, player: PlayerId::the_bank() }),
 
             Action::Deleted { banker, .. } |
@@ -594,9 +637,13 @@ impl State {
             Action::WindUp { account, .. } =>
                 // Only the parent can wind up a company, to prevent easy default
                 Ok(ActionPermissions{level: ActionLevel::Normal, player: account.parent().ok_or(Error::UnauthorisedShared)?.into()}),
-
             Action::CreateOrUpdateShared { name, .. } =>
-                Ok(ActionPermissions{level: ActionLevel::Normal, player: name.clone().into()})
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: name.clone().into()}),
+
+            // Managing products directly can only be done by the issuer
+            Action::Issue { product, .. } |
+            Action::Remove { product, .. } =>
+                Ok(ActionPermissions { level: ActionLevel::Normal, player: product.issuer().clone().into() })
         }
     }
     /// Nice macro for checking whether a player is a banker
@@ -650,6 +697,10 @@ impl State {
                     self.balance.check_asset_removal(&player, asset, *count)?;
                     // Check to see if they are allowed it
                     self.auth.check_withdrawal_authorized(&player, asset, *count)?;
+                    // Check to make sure they're not trying to withdraw ETPs, because that makes no sense
+                    if asset.contains('%') {
+                        return Err(Error::UnauthorisedWithdrawal { asset: asset.clone(), amount_overdrawn: None })
+                    }
                 }
 
                 // Now take the assets, as we've confirmed they can afford it
@@ -750,10 +801,9 @@ impl State {
                 {
                     return Err(Error::UnknownAsset { asset: asset.clone() });
                 }
-                let restricted_assets = HashSet::from_iter(restricted_assets);
                 // A list of the assets that just became restricted
                 let newly_restricted = restricted_assets.difference(self.auth.get_restricted()).cloned().collect::<Vec<_>>();
-                self.auth.update_restricted(restricted_assets.clone());
+                self.auth.update_restricted(restricted_assets);
                 // Authorise everyone who is already holding the item to withdraw what they have
                 for asset in newly_restricted {
                     for (player, their_assets) in self.balance.get_all_assets() {
@@ -850,7 +900,22 @@ impl State {
                     self.balance.commit_coin_removal(account.as_ref(), coins).expect("Failed to remove coins in windup");
                     self.balance.commit_coin_add(parent.as_ref(), coins);
                 })
-            }
+            },
+            Action::UpdateETPAuthorised { accounts } => {
+                self.auth.update_etp_authorised(accounts);
+                Ok(())
+            },
+            Action::Issue { product, count } => {
+                if !self.auth.is_etp_authorised(product.issuer()) {
+                    return Err(Error::UnauthorisedIssue{account: product.issuer().clone()})
+                }
+                self.balance.commit_asset_add(product.issuer().as_ref(), &(&product).into(), count as u64);
+                Ok(())
+            },
+            Action::Remove { product, count } => {
+                // We don't check to see if they are currently allowed to issue, because they are only removing owned assets that they issued
+                self.balance.commit_asset_removal(product.issuer().as_ref(), &(&product).into(), count)
+            },
         }
     }
     /// Load in the transactions from a trade file. Because of numbering, we must do this first; we cannot append

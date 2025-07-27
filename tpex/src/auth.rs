@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{AssetId, Error, PlayerId, Result};
+use crate::{AssetId, Error, PlayerId, Result, SharedId};
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct AuthSync {
@@ -8,12 +8,15 @@ pub struct AuthSync {
     pub restricted: std::collections::HashSet<AssetId>,
     /// The authorisations that various players have
     pub authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
+    /// The shared accounts allowed to issue ETPs
+    pub etp_authorised: std::collections::HashSet<SharedId>,
 }
 impl From<&AuthTracker> for AuthSync {
     fn from(value: &AuthTracker) -> Self {
         AuthSync {
             restricted: value.restricted.clone(),
             authorisations: value.authorisations.clone(),
+            etp_authorised: value.etp_authorised.clone()
         }
     }
 }
@@ -23,7 +26,8 @@ impl TryFrom<AuthSync> for AuthTracker {
     fn try_from(value: AuthSync) -> Result<AuthTracker> {
         Ok(AuthTracker {
             restricted: value.restricted,
-            authorisations: value.authorisations
+            authorisations: value.authorisations,
+            etp_authorised: value.etp_authorised
         })
     }
 }
@@ -34,6 +38,8 @@ pub(crate) struct AuthTracker {
     restricted: std::collections::HashSet<AssetId>,
     /// The authorisations that various players have
     authorisations: std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>>,
+    /// The shared accounts allowed to issue ETPs
+    pub etp_authorised: std::collections::HashSet<SharedId>,
 }
 impl Default for AuthTracker {
     fn default() -> Self {
@@ -45,6 +51,7 @@ impl AuthTracker {
         AuthTracker {
             restricted: Default::default(),
             authorisations: Default::default(),
+            etp_authorised: Default::default()
         }
     }
     /// Returns true if the given item is currently restricted
@@ -124,5 +131,13 @@ impl AuthTracker {
             }
         }
         Ok(())
+    }
+    /// Update the list of ETP authorised shared accounts
+    pub fn update_etp_authorised(&mut self, etp_authorised: std::collections::HashSet<SharedId>) {
+        self.etp_authorised = etp_authorised;
+    }
+    /// Checks to see if a shared account is allowed to issue ETPs
+    pub fn is_etp_authorised(&self, account: &SharedId) -> bool {
+        self.etp_authorised.contains(account)
     }
 }
