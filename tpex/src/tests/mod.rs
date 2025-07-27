@@ -681,7 +681,7 @@ async fn authorisations() {
     println!("Restricting item");
     state.assert_state(
         Action::UpdateRestricted {
-            restricted_assets: vec![unauthed.clone()],
+            restricted_assets: [unauthed.clone()].into_iter().collect(),
         },
         ExpectedState {
             assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 100)],
@@ -774,7 +774,7 @@ async fn authorisations() {
     println!("Unrestricting asset again");
     state.assert_state(
         Action::UpdateRestricted {
-            restricted_assets: Vec::new(),
+            restricted_assets: Default::default(),
         },
         ExpectedState {
             assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
@@ -972,12 +972,12 @@ fn fuzz_shared_id() {
 
 #[tokio::test]
 async fn test_shared() {
+    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
-        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+        players: [player(1), player(2), player(3), shared_name.clone().into(), PlayerId::the_bank()]
     };
-    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
     // Try with invalid consensus
     state.assert_state(
         Action::CreateOrUpdateShared {
@@ -1378,6 +1378,111 @@ async fn test_shared() {
         ExpectedState {
             coins_appeared: vec![(PlayerId::the_bank(), Coins::from_coins(1970))],
             coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(1969)), (child_name.clone().into(), Coins::from_coins(1))],
+            ..Default::default()
+        }
+    ).await;
+}
+#[test]
+fn fuzz_etp() {
+    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
+    assert!(ETPId::try_new(shared_name.clone(), "foobar".to_owned()).is_ok());
+    assert!(ETPId::try_new(shared_name.clone(), "%foobar".to_owned()).is_err());
+    assert!(ETPId::try_new(shared_name.clone(), "f%oobar".to_owned()).is_err());
+}
+
+#[tokio::test]
+async fn issue_etp() {
+    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
+    let mut state = MatchStateWrapper {
+        state: State::new(),
+        sink: WriteSink::default(),
+        players: [player(1), player(2), player(3), shared_name.clone().into(), PlayerId::the_bank()]
+    };
+    // Create the issuer
+    state.assert_state(
+        Action::CreateOrUpdateShared {
+            name: shared_name.clone(),
+            owners: vec![player(1)],
+            min_difference: 1,
+            min_votes: 1
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    let etp = ETPId::try_new(shared_name.clone(), "foobar".to_owned()).expect("Valid ETP name still threw error");
+    // Ensure that ETPs need authorisation
+    state.assert_state(
+        Action::Issue {
+            product: etp.clone(),
+            count: 64
+        },
+        ExpectedState {
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    // Give them ETP status
+    state.assert_state(
+        Action::UpdateETPAuthorised  {
+            accounts: [shared_name.clone()].into_iter().collect()
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    // Issue the etps
+    state.assert_state(
+        Action::Issue {
+            product: etp.clone(),
+            count: 64
+        },
+        ExpectedState {
+            assets: vec![(shared_name.clone().into(), (&etp).into(), 64)],
+            ..Default::default()
+        }
+    ).await;
+    // Issue some more etps
+    state.assert_state(
+        Action::Issue {
+            product: etp.clone(),
+            count: 32
+        },
+        ExpectedState {
+            assets: vec![(shared_name.clone().into(), (&etp).into(), 96)],
+            ..Default::default()
+        }
+    ).await;
+    // Overremove etps
+    state.assert_state(
+        Action::Remove {
+            product: etp.clone(),
+            count: 100
+        },
+        ExpectedState {
+            assets: vec![(shared_name.clone().into(), (&etp).into(), 96)],
+            should_fail: true,
+            ..Default::default()
+        }
+    ).await;
+    // Remove some etps
+    state.assert_state(
+        Action::Remove {
+            product: etp.clone(),
+            count: 16
+        },
+        ExpectedState {
+            assets: vec![(shared_name.clone().into(), (&etp).into(), 80)],
+            ..Default::default()
+        }
+    ).await;
+    // Remove remaining etps
+    state.assert_state(
+        Action::Remove {
+            product: etp.clone(),
+            count: 80
+        },
+        ExpectedState {
             ..Default::default()
         }
     ).await;
