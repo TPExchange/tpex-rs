@@ -44,6 +44,7 @@ impl PlayerId {
     pub fn get_raw_name(&self) -> &String { &self.0 }
     pub fn the_bank() -> PlayerId { PlayerId("/".to_owned()) }
     pub fn is_bank(&self) -> bool { self.0 == "/" }
+    pub fn is_unshared(&self) -> bool { !self.0.starts_with('/') }
 }
 impl<'de> Deserialize<'de> for PlayerId {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
@@ -385,6 +386,7 @@ pub enum Error {
     InvalidThreshold,
     InvalidSharedId,
     UnauthorisedShared,
+    UnsharedOnly
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -424,19 +426,22 @@ impl std::fmt::Display for Error {
                 write!(f, "Too much precision was given for the coins: the system can only handle 3 decimal places.")
             },
             Error::InvalidRates => {
-                write!(f, "The provided rates were invalid")
+                write!(f, "The provided rates were invalid.")
             },
             Error::InvalidFastSync => {
-                write!(f, "The provided FastSync struct was corrupted")
+                write!(f, "The provided FastSync struct was corrupted.")
             },
             Error::InvalidThreshold => {
-                write!(f, "The provided threshold was either unsatisfiable or zero")
+                write!(f, "The provided threshold was either unsatisfiable or zero.")
             },
             Error::InvalidSharedId => {
-                write!(f, "The requested action involves a non-existent shared account")
+                write!(f, "The requested action involves a non-existent shared account.")
             },
             Error::UnauthorisedShared => {
-                write!(f, "The requested action requires the player to have access to a shared account that they do not")
+                write!(f, "The requested action requires the player to have access to a shared account that they do not.")
+            },
+            Error::UnsharedOnly => {
+                write!(f, "The requested action can only be performed on an unshared account.")
             }
         }
 
@@ -633,6 +638,10 @@ impl State {
                 self.balance.commit_asset_removal(&player, &asset, count)
             },
             Action::WithdrawalRequested { player, assets} => {
+                // Shared accounts cannot directly withdraw
+                if !player.is_unshared() {
+                    return Err(Error::UnsharedOnly)
+                }
                 // There's no good way of doing this without two passes, so we check then commit
                 //
                 // BTreeMap ensures that the same asset cannot occur twice, so we don't have to worry about double spending
