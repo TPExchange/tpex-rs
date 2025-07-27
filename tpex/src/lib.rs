@@ -587,7 +587,8 @@ impl State {
             },
 
             Action::WindUp { account, .. } =>
-                Ok(ActionPermissions{level: ActionLevel::Normal, player: account.clone().into()}),
+                // Only the parent can wind up a company, to prevent easy default
+                Ok(ActionPermissions{level: ActionLevel::Normal, player: account.parent().ok_or(Error::UnauthorisedShared)?.into()}),
 
             Action::CreateOrUpdateShared { name, .. } =>
                 Ok(ActionPermissions{level: ActionLevel::Normal, player: name.clone().into()})
