@@ -141,3 +141,13 @@ pub struct ErrorInfo {
 pub struct PollGetArgs {
     pub id: u64
 }
+#[derive(Default, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct InspectBalanceGetArgs {
+    pub player: PlayerId
+}
+#[derive(Default, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct InspectAssetsGetArgs {
+    pub player: PlayerId
+}

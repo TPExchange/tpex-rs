@@ -151,6 +151,20 @@ impl Remote {
             ret
         }))
     }
+    pub async fn get_balance(&self, player: &tpex::PlayerId) -> Result<tpex::Coins> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /inspect/balance").push("inspect").push("balance");
+        target.query_pairs_mut().append_pair("player", player.get_raw_name());
+
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
+    }
+    pub async fn get_assets(&self, player: &tpex::PlayerId) -> Result<std::collections::HashMap<AssetId, u64>> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /inspect/assets").push("inspect").push("assets");
+        target.query_pairs_mut().append_pair("player", player.get_raw_name());
+
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
+    }
 }
 
 pub struct Mirrored {

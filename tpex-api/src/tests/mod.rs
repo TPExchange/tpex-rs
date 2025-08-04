@@ -258,3 +258,28 @@ async fn reload_state() {
     let state2 = client2.get_state(0).await.expect("Could not get second state");
     assert_eq!(state1, state2);
 }
+
+// After nasty bug that caused reloads to not have newlines
+#[tokio::test]
+async fn test_inspect() {
+    let server = RunningServer::start_server().await;
+    let client = Remote::new(server.url, server.token);
+    // Disable fees
+    client.apply(&tpex::Action::UpdateBankRates { rates: tpex::BankRates::free() }).await.unwrap();
+    // Deposit diamonds
+    client.apply(&tpex::Action::Deposit { player: player(1), asset: tpex::DIAMOND_NAME.into(), count: 64, banker: PlayerId::the_bank() }).await.unwrap();
+    // No autoconversion
+    assert_eq!(client.get_balance(&player(1)).await.expect("Failed to get balance"), tpex::Coins::default());
+    assert_eq!(client.get_assets(&player(1)).await.expect("Failed to get assets"), [(tpex::DIAMOND_NAME.into(), 64)].into());
+    // Non-existent account should be empty
+    assert_eq!(client.get_balance(&player(2)).await.expect("Failed to get balance"), tpex::Coins::default());
+    assert_eq!(client.get_assets(&player(2)).await.expect("Failed to get assets"), Default::default());
+    // Convert diamonds
+    client.apply(&tpex::Action::BuyCoins { player: player(1), n_diamonds: 32 }).await.unwrap();
+    // Should be split now
+    assert_eq!(client.get_balance(&player(1)).await.expect("Failed to get balance"), tpex::Coins::from_coins(32_000));
+    assert_eq!(client.get_assets(&player(1)).await.expect("Failed to get assets"), [(tpex::DIAMOND_NAME.into(), 32)].into());
+    // Non-existent account should be empty
+    assert_eq!(client.get_balance(&player(2)).await.expect("Failed to get balance"), tpex::Coins::default());
+    assert_eq!(client.get_assets(&player(2)).await.expect("Failed to get assets"), Default::default());
+}

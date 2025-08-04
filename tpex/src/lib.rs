@@ -506,7 +506,7 @@ pub struct BankRates {
     coins_buy_ppm: u64
 }
 impl BankRates {
-    fn check(&self) -> Result<()> {
+    pub fn check(&self) -> Result<()> {
         if
             self.investment_ppm > 1_000_000 ||
             // We don't need to limit this, as they just pay a lot, rather than losing money
@@ -521,6 +521,9 @@ impl BankRates {
         else {
             Ok(())
         }
+    }
+    pub const fn free() -> BankRates {
+        BankRates { investment_ppm: 0, buy_order_ppm: 0, sell_order_ppm: 0, coins_sell_ppm: 0, coins_buy_ppm: 0 }
     }
 }
 

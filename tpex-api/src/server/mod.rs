@@ -219,6 +219,21 @@ async fn fastsync_get(
     }
 }
 
+async fn inspect_balance_get(
+    axum::extract::State(state): axum::extract::State<state_type!()>,
+    _token: TokenInfo,
+    axum::extract::Query(args): axum::extract::Query<InspectBalanceGetArgs>
+) -> axum::response::Response {
+    axum::Json(state.tpex.read().await.state().get_bal(&args.player)).into_response()
+}
+
+async fn inspect_assets_get(
+    axum::extract::State(state): axum::extract::State<state_type!()>,
+    _token: TokenInfo,
+    axum::extract::Query(args): axum::extract::Query<InspectBalanceGetArgs>
+) -> axum::response::Response {
+    axum::Json(state.tpex.read().await.state().get_assets(&args.player)).into_response()
+}
 pub async fn run_server<L: Listener>(
     cancel: CancellationToken,
     mut trade_log: impl AsyncWrite + AsyncBufRead + AsyncSeek + Unpin + Send + Sync + 'static,
@@ -268,6 +283,9 @@ pub async fn run_server<L: Listener>(
         .route("/token", axum::routing::delete(token_delete))
 
         .route("/fastsync", axum::routing::get(fastsync_get))
+
+        .route("/inspect/balance", axum::routing::get(inspect_balance_get))
+        .route("/inspect/assets", axum::routing::get(inspect_assets_get))
 
         .with_state(std::sync::Arc::new(state))
 
