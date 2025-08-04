@@ -715,7 +715,7 @@ impl State {
                 }
 
                 // Register the withdrawal. This cannot fail, so we don't have to worry about atomicity
-                self.withdrawal.track_withdrawal(id, player, assets, Coins::default());
+                self.withdrawal.track_withdrawal(id, player, assets);
                 Ok(())
             },
             Action::SellOrder { player, asset, count, coins_per } => {
@@ -760,9 +760,7 @@ impl State {
             Action::WithdrawalCompleted { target, banker } => {
                 self.check_banker(&banker)?;
                 // Try to take out the pending transaction
-                let res = self.withdrawal.complete(target)?;
-                // Add the profit
-                self.balance.commit_coin_add(&PlayerId::the_bank(), res.total_fee);
+                self.withdrawal.complete(target)?;
                 Ok(())
             },
             Action::CancelOrder { target } => {
@@ -993,7 +991,6 @@ pub struct StateSync {
     pub balances: BalanceSync,
     pub rates: BankRates,
     pub auth: AuthSync,
-    // pub investment: InvestmentSync,
     pub order: OrderSync,
     pub withdrawal: WithdrawalSync,
     pub shared_account: SharedSync

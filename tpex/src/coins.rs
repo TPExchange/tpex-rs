@@ -15,11 +15,6 @@ impl Coins {
     pub const fn from_coins(coins: u32) -> Coins {
         Coins{milli: coins as u64 * 1000 }
     }
-    // pub fn from_diamonds(diamonds: u64) -> Result<Coins> {
-    //     diamonds.checked_mul(1_000_000)
-    //     .map(Coins::from_millicoins)
-    //     .ok_or(Error::Overflow)
-    // }
     pub const fn is_zero(&self) -> bool { self.milli == 0 }
 
     pub fn checked_add(&self, other: Coins) -> Result<Coins> {
@@ -54,21 +49,9 @@ impl Coins {
         Ok(Coins::from_millicoins(fee as u64))
     }
 }
-// impl Add for Coins {
-//     type Output = Coins;
-
-//     fn add(self, rhs: Self) -> Self::Output {
-//         self.checked_add(rhs).expect("Coin add overflow")
-//     }
-// }
-// impl Sub for Coins {
-//     type Output = Coins;
-
-//     fn add(self, rhs: Self) -> Self::Output {
-//         self.checked_add(rhs).expect("Coin add overflow")
-//     }
-// }
 impl Display for Coins {
+    // Disable a check that makes the code harder to read in this case
+    #[allow(clippy::uninlined_format_args)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let whole = self.milli / 1000;
         let frac = self.milli % 1000;

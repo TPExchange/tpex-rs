@@ -19,7 +19,7 @@ impl From<&WithdrawalTracker> for WithdrawalSync {
         WithdrawalSync {
             pending_withdrawals:
                 value.pending_withdrawals.values()
-                .map(|PendingWithdrawal { id, player, assets, total_fee: _total_fee }|
+                .map(|PendingWithdrawal { id, player, assets }|
                     (*id, PendingSync { player: player.clone(), assets: assets.clone() })
                 )
                 .collect()
@@ -37,7 +37,7 @@ impl TryFrom<WithdrawalSync> for WithdrawalTracker {
                     for (asset, count) in &assets {
                         current_audit.add_asset(asset.clone(), *count);
                     }
-                    (id, PendingWithdrawal { player, assets, id, total_fee: Coins::default() })
+                    (id, PendingWithdrawal { player, assets, id })
                 })
                 .collect(),
             current_audit
@@ -49,8 +49,7 @@ impl TryFrom<WithdrawalSync> for WithdrawalTracker {
 pub struct PendingWithdrawal {
     pub id: u64,
     pub player: PlayerId,
-    pub assets: std::collections::HashMap<AssetId, u64>,
-    pub total_fee: Coins
+    pub assets: std::collections::HashMap<AssetId, u64>
 }
 
 #[derive(Debug, Default, Clone)]
@@ -74,16 +73,14 @@ impl WithdrawalTracker {
     pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawal> {
         self.pending_withdrawals.values().next().cloned()
     }
-    pub fn track_withdrawal(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>, total_fee: Coins) {
-        self.pending_withdrawals.insert(id, PendingWithdrawal{ id, player, assets: assets.clone(), total_fee });
-        self.current_audit += Audit{coins: total_fee, assets}
+    pub fn track_withdrawal(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>) {
+        self.pending_withdrawals.insert(id, PendingWithdrawal{ id, player, assets: assets.clone() });
+        self.current_audit += Audit{coins: Coins::default(), assets}
     }
     pub fn complete(&mut self, id: u64) -> Result<PendingWithdrawal, Error> {
         // Try to take out the pending transaction
         let Some(res) = self.pending_withdrawals.remove(&id)
         else { return Err(Error::InvalidId{id}); };
-        // We are no longer responsible for the fee
-        self.current_audit.sub_coins(res.total_fee);
         // We no longer have the items
         for (asset, count) in res.assets.iter() {
             self.current_audit.sub_asset(asset.clone(), *count);
@@ -100,7 +97,6 @@ impl Auditable for WithdrawalTracker {
             for (asset, count) in &withdrawal.assets {
                 new_audit.add_asset(asset.clone(), *count);
             }
-            new_audit.add_coins(withdrawal.total_fee);
         }
         if new_audit != self.current_audit {
             panic!("Recalculated withdrawal audit differs from soft audit");

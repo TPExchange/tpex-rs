@@ -630,17 +630,6 @@ async fn lifecycle() {
     let deser: State = sync_dejson.try_into().expect("Could not deserialise state sync");
     let deser_ser: StateSync = (&deser).into();
     assert_eq!(sync, deser_ser, "FastSync mismatch");
-
-    // let (state, mut source) = {
-    //     let tmp = state.state.clone();
-    //     let x = state.sink.clone();
-    //     drop(state);
-    //     (tmp, x)
-    // };
-
-    // let mut state2 = State::new();
-    // state2.replay(&mut source.as_ref(), true).await.expect("Failed to replay");
-    // assert_eq!(serde_json::to_string(&state).unwrap(), serde_json::to_string(&state2).unwrap());
 }
 
 #[tokio::test]
