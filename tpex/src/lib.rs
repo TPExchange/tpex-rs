@@ -30,11 +30,10 @@ pub const DIAMOND_NAME: &str = "diamond";
 pub const DIAMOND_RAW_COINS: Coins = Coins::from_coins(1000);
 
 const INITIAL_BANK_RATES: BankRates = BankRates {
-    investment_ppm:    25_0000,
     buy_order_ppm:      0_0000,
     sell_order_ppm:     0_0000,
-    coins_sell_ppm:    1_0000,
-    coins_buy_ppm:   1_0000,
+    coins_sell_ppm:    5_0000,
+    coins_buy_ppm:   5_0000,
 };
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Default, Debug, Clone, Hash)]
@@ -319,7 +318,7 @@ impl Action {
     }
 }
 
-#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Audit {
     pub coins: Coins,
     pub assets: std::collections::HashMap<AssetId, u64>
@@ -494,8 +493,6 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct BankRates {
-    /// The parts per million fee for an investment return
-    investment_ppm: u64,
     /// The parts per million fee for each partial completion of a buy order
     buy_order_ppm: u64,
     /// The parts per million fee for each partial completion of a sell order
@@ -508,7 +505,6 @@ pub struct BankRates {
 impl BankRates {
     pub fn check(&self) -> Result<()> {
         if
-            self.investment_ppm > 1_000_000 ||
             // We don't need to limit this, as they just pay a lot, rather than losing money
             // self.buy_order_ppm > 1_000_000 ||
             self.sell_order_ppm > 1_000_000 ||
@@ -523,7 +519,7 @@ impl BankRates {
         }
     }
     pub const fn free() -> BankRates {
-        BankRates { investment_ppm: 0, buy_order_ppm: 0, sell_order_ppm: 0, coins_sell_ppm: 0, coins_buy_ppm: 0 }
+        BankRates { buy_order_ppm: 0, sell_order_ppm: 0, coins_sell_ppm: 0, coins_buy_ppm: 0 }
     }
 }
 
@@ -665,11 +661,10 @@ impl State {
         // Blanket check perms
         //
         // TODO: optimise
-        if let ActionPermissions { level: ActionLevel::Banker, player } = self.perms(&action)? {
-            if !self.is_banker(&player) {
+        if let ActionPermissions { level: ActionLevel::Banker, player } = self.perms(&action)?
+            && !self.is_banker(&player) {
                 return Err(Error::NotABanker { player });
             }
-        }
 
         match action {
             Action::Deleted{..} => Ok(()),
@@ -986,9 +981,25 @@ impl Auditable for State {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ItemisedAudit {
+    pub balance: Audit,
+    pub order: Audit,
+    pub withdrawal: Audit,
+}
+impl State {
+    pub fn itemised_audit(&self) -> ItemisedAudit {
+        ItemisedAudit {
+            balance: self.balance.soft_audit(),
+            order: self.order.soft_audit(),
+            withdrawal: self.withdrawal.soft_audit(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct StateSync {
     pub current_id: u64,
-    pub balances: BalanceSync,
+    pub balance: BalanceSync,
     pub rates: BankRates,
     pub auth: AuthSync,
     pub order: OrderSync,
@@ -999,7 +1010,7 @@ impl From<&State> for StateSync {
     fn from(value: &State) -> Self {
         Self {
             current_id: value.next_id.checked_sub(1).unwrap(),
-            balances: (&value.balance).into(),
+            balance: (&value.balance).into(),
             rates: value.rates.clone(),
             auth: (&value.auth).into(),
             order: (&value.order).into(),
@@ -1014,7 +1025,7 @@ impl TryFrom<StateSync> for State {
         Ok(Self {
             next_id: value.current_id.checked_add(1).ok_or(Error::Overflow)?,
             rates: value.rates,
-            balance: value.balances.try_into()?,
+            balance: value.balance.try_into()?,
             asset_info: DEFAULT_ASSET_INFO.clone(),
             order: value.order.try_into()?,
             withdrawal: value.withdrawal.try_into()?,

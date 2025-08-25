@@ -165,6 +165,12 @@ impl Remote {
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
+    pub async fn itemised_audit(&self) -> Result<tpex::ItemisedAudit> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /inspect/audit").push("inspect").push("audit");
+
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
+    }
 }
 
 pub struct Mirrored {
@@ -181,13 +187,13 @@ impl Mirrored {
     pub async fn update_asset_info(&self, asset_info: std::collections::HashMap<AssetId, AssetInfo>) {
         self.state.write().await.update_asset_info(asset_info)
     }
-    pub async fn fastsync(&self) -> Result<tokio::sync::RwLockReadGuard<State>> {
+    pub async fn fastsync(&'_ self) -> Result<tokio::sync::RwLockReadGuard<'_, State>> {
         let new_state: State = self.remote.fastsync().await?.try_into()?;
         let mut state = self.state.write().await;
         *state = new_state;
         Ok(state.downgrade())
     }
-    pub async fn sync(&self) -> Result<tokio::sync::RwLockReadGuard<State>> {
+    pub async fn sync(&'_ self) -> Result<tokio::sync::RwLockReadGuard<'_, State>> {
         let mut state = self.state.write().await;
         let cursor = std::io::Cursor::new(self.remote.get_state(state.get_next_id() - 1).await?);
         let mut buf = tokio::io::BufReader::new(cursor);

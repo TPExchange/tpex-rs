@@ -239,7 +239,7 @@ async fn stream_fastsync() {
             panic!("Too many loops");
         }
     };
-    assert_eq!(wrapped.balances.assets[&PlayerId::assume_username_correct("test".to_owned())][&AssetId::from("cobblestone")], 6);
+    assert_eq!(wrapped.balance.assets[&PlayerId::assume_username_correct("test".to_owned())][&AssetId::from("cobblestone")], 6);
 }
 
 // After nasty bug that caused reloads to not have newlines
@@ -282,4 +282,7 @@ async fn test_inspect() {
     // Non-existent account should be empty
     assert_eq!(client.get_balance(&player(2)).await.expect("Failed to get balance"), tpex::Coins::default());
     assert_eq!(client.get_assets(&player(2)).await.expect("Failed to get assets"), Default::default());
+
+    // Test audit
+    assert_eq!(client.itemised_audit().await.expect("Failed to get itemised audit"), tpex::State::try_from(client.fastsync().await.expect("Failed to fastsync")).expect("Bad fastsync").itemised_audit())
 }
