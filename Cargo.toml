@@ -3,8 +3,7 @@
 resolver = "2"
 members = [
   "tpex",
-  "tpex-api",
-  "tpex-capi"
+  "tpex-api"
 ]
 [workspace.dependencies]
 tpex-api = { features = ["server", "client"] }
