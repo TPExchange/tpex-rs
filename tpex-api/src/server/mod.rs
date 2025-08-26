@@ -8,7 +8,7 @@ use axum::{extract::{ws::rejection::WebSocketUpgradeRejection, FromRequestParts}
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite};
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
-use tpex::{ActionLevel, StateSync};
+use tpex::StateSync;
 #[derive(clap::Parser)]
 pub struct Args {
     pub trades: std::path::PathBuf,
@@ -63,9 +63,6 @@ async fn state_patch(
             let perms = state.tpex.read().await.state().perms(&action)?;
             if perms.player != token.user {
                 return Err(Error::UncontrolledUser);
-            }
-            if perms.level > ActionLevel::Normal {
-                return Err(Error::TokenTooLowLevel);
             }
         }
         // Apply catches all banker perm mismatches, assuming that upstream has verified their action:
@@ -187,7 +184,7 @@ async fn token_delete(
 ) -> Result<axum::Json<()>, Error> {
     let target = args.token.unwrap_or(token.token);
     // We only need perms to delete other tokens
-    if target != token.token && token.level < TokenLevel::ProxyAll {
+    if target != token.token && token.level < TokenLevel::ProxyOne {
         return Err(Error::TokenTooLowLevel);
     }
     state.tokens.delete_token(&token.token).await
