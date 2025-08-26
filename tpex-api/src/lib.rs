@@ -10,7 +10,7 @@ use futures::{StreamExt, TryStreamExt};
 use reqwest::StatusCode;
 use reqwest_websocket::{Message, RequestBuilderExt};
 pub use shared::*;
-use tpex::{AssetId, AssetInfo, State, StateSync};
+use tpex::{AssetId, State, StateSync};
 
 pub use shared::Token;
 
@@ -184,9 +184,6 @@ impl Mirrored {
             state: tokio::sync::RwLock::new(State::new())
         }
     }
-    pub async fn update_asset_info(&self, asset_info: std::collections::HashMap<AssetId, AssetInfo>) {
-        self.state.write().await.update_asset_info(asset_info)
-    }
     pub async fn fastsync(&'_ self) -> Result<tokio::sync::RwLockReadGuard<'_, State>> {
         let new_state: State = self.remote.fastsync().await?.try_into()?;
         let mut state = self.state.write().await;
@@ -205,10 +202,6 @@ impl Mirrored {
         let id = self.remote.apply(&action).await?;
         drop(self.sync().await);
         Ok(id)
-    }
-    // This isn't synced
-    pub async fn asset_info(&self, asset: &AssetId) -> std::result::Result<AssetInfo, tpex::Error> {
-        self.state.read().await.asset_info(asset)
     }
     pub async fn stream(self: std::sync::Arc<Self>) -> Result<impl futures::Stream<Item=Result<(std::sync::Arc<Self>, tpex::WrappedAction)>>> {
         let next_id = self.state.read().await.get_next_id();

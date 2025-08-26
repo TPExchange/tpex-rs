@@ -106,19 +106,6 @@ async fn deposit_undeposit() {
 }
 
 #[tokio::test]
-async fn invalid_deposit() {
-    let mut state = State::new();
-    let mut sink = WriteSink::default();
-
-    state.apply(Action::Deposit {
-        player: player(1),
-        asset: "costelbone".to_owned(),
-        count: 49,
-        banker: PlayerId::the_bank()
-    }, &mut sink).await.expect_err("Costlebone deposited");
-}
-
-#[tokio::test]
 async fn undeposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
@@ -584,7 +571,7 @@ async fn lifecycle() {
     // Test over-withdrawing
     println!("Purposefully oversell coins");
     state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(3),
             assets: [(item.clone(), 192)].into()
         },
@@ -597,7 +584,7 @@ async fn lifecycle() {
 
     println!("Withdraw the {item}");
     let target = state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(3),
             assets: [(item.clone(), 120)].into()
         },
@@ -609,7 +596,7 @@ async fn lifecycle() {
 
     println!("Completing withdrawal");
     state.assert_state(
-        Action::WithdrawalCompleted {
+        Action::CompleteWithdrawal {
             target,
             banker: PlayerId::the_bank()
         },
@@ -679,7 +666,7 @@ async fn authorisations() {
     ).await;
     println!("Withdrawing restricted asset after already having deposited it");
     state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(1),
             assets: [(unauthed.clone(), 1)].into()
         },
@@ -703,7 +690,7 @@ async fn authorisations() {
     ).await;
     println!("Attempting to withdraw restricted asset from unauthorised player");
     state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(2),
             assets: [(unauthed.clone(), 2)].into()
         },
@@ -727,7 +714,7 @@ async fn authorisations() {
     ).await;
     println!("Attempting to overwithdraw restricted asset from newly authorised player");
     state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(2),
             assets: [(unauthed.clone(), 2)].into()
         },
@@ -739,7 +726,7 @@ async fn authorisations() {
     ).await;
     println!("Withdrawing restricted asset from newly authorised player");
     state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(2),
             assets: [(unauthed.clone(), 1)].into()
         },
@@ -750,7 +737,7 @@ async fn authorisations() {
     ).await;
     println!("Again overwithdrawing restricted asset from newly authorised player");
     state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(2),
             assets: [(unauthed.clone(), 1)].into()
         },
@@ -772,7 +759,7 @@ async fn authorisations() {
     ).await;
     println!("Withdrawing final part");
     state.assert_state(
-        Action::WithdrawalRequested {
+        Action::RequestWithdrawal {
             player: player(2),
             assets: [(unauthed.clone(), 1)].into()
         },

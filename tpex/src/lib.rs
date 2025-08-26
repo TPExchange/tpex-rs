@@ -101,15 +101,15 @@ pub enum Action {
         banker: PlayerId,
     },
     /// Player asked to withdraw assets
-    WithdrawalRequested {
+    RequestWithdrawal {
         /// The player who requested the withdrawal
         player: PlayerId,
         /// The assets to withdraw
         assets: std::collections::HashMap<AssetId,u64>
     },
     /// A banker has agreed to take out assets imminently
-    WithdrawalCompleted {
-        /// The ID of the corresponding WithdrawalRequested transaction
+    CompleteWithdrawal {
+        /// The ID of the corresponding RequestWithdrawal transaction
         target: u64,
         /// The banker who confirmed it
         banker: PlayerId,
@@ -289,7 +289,7 @@ impl Action {
                 audit.sub_asset(asset.clone(), *count);
                 Some(audit)
             }
-            Action::WithdrawalCompleted{..} => {
+            Action::CompleteWithdrawal{..} => {
                 // We don't know what the withdrawal is just from the id
                 //
                 // TODO: find a way to track this nicely
@@ -388,10 +388,6 @@ pub struct WrappedAction {
     pub action: Action,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct AssetInfo {
-    pub stack_size: u64
-}
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     OverdrawnAsset {
@@ -409,7 +405,6 @@ pub enum Error {
     /// Some 1337 hacker tried an overflow attack >:(
     Overflow,
     InvalidId{id: u64},
-    UnknownAsset{asset: AssetId},
     AlreadyDone,
     NotABanker{player: PlayerId},
     CoinStringMangled,
@@ -444,9 +439,6 @@ impl std::fmt::Display for Error {
             },
             Error::InvalidId { id } => {
                 write!(f, "The action ID {id} was invalid.")
-            }
-            Error::UnknownAsset { asset } => {
-                write!(f, "The item \"{asset}\" is not on our list.")
             },
             Error::AlreadyDone => {
                 write!(f, "The requested action is redundant.")
@@ -523,14 +515,11 @@ impl BankRates {
     }
 }
 
-static DEFAULT_ASSET_INFO: std::sync::LazyLock<std::collections::HashMap<AssetId, AssetInfo>> = std::sync::LazyLock::new(|| serde_json::from_str(include_str!("../resources/assets.json")).expect("Could not parse asset_info"));
-
 #[derive(Debug, Clone)]
 pub struct State {
     next_id: u64,
     rates: BankRates,
 
-    asset_info: std::collections::HashMap<AssetId, AssetInfo>,
     auth: auth::AuthTracker,
     balance: balance::BalanceTracker,
     order: order::OrderTracker,
@@ -539,12 +528,10 @@ pub struct State {
 }
 impl Default for State {
     fn default() -> State {
-        let asset_info = DEFAULT_ASSET_INFO.clone();
         State {
             // Start on ID 1 for nice mapping to line numbers
             next_id: 1,
             rates: INITIAL_BANK_RATES,
-            asset_info,
             auth: Default::default(),
             balance: Default::default(),
             order: Default::default(),
@@ -556,14 +543,6 @@ impl Default for State {
 impl State {
     /// Create a new empty state
     pub fn new() -> State { Self::default() }
-    /// Adds or updates the given asset infos
-    pub fn update_asset_info(&mut self, asset_info: std::collections::HashMap<AssetId, AssetInfo>) {
-        self.asset_info.extend(asset_info);
-    }
-    /// Gets info about a certain asset
-    pub fn asset_info(&self, asset: &AssetId) -> Result<AssetInfo> {
-        self.asset_info.get(asset).cloned().ok_or_else(|| Error::UnknownAsset { asset: asset.clone() })
-    }
     /// Get the next line
     pub fn get_next_id(&self) -> u64 { self.next_id }
     /// Get a player's balance
@@ -607,7 +586,7 @@ impl State {
 
             Action::Deleted { banker, .. } |
             Action::Deposit { banker, .. } |
-            Action::WithdrawalCompleted { banker, .. } |
+            Action::CompleteWithdrawal { banker, .. } |
             Action::Undeposit { banker, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
 
@@ -617,7 +596,7 @@ impl State {
             Action::SellOrder { player, .. } |
             Action::TransferAsset { payer: player, .. } |
             Action::TransferCoins { payer: player, .. } |
-            Action::WithdrawalRequested { player, .. } |
+            Action::RequestWithdrawal { player, .. } |
             Action::Agree { player, .. } |
             Action::Disagree { player, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Normal, player: player.clone()}),
@@ -670,9 +649,6 @@ impl State {
             Action::Deleted{..} => Ok(()),
             Action::Deposit { player, asset, count, banker } => {
                 self.check_banker(&banker)?;
-                if !self.asset_info.contains_key(&asset) {
-                    return Err(Error::UnknownAsset { asset });
-                }
                 self.balance.commit_asset_add(&player, &asset, count);
                 self.auth.increase_authorisation(player, asset, count).expect("Authorisation overflow");
 
@@ -682,7 +658,7 @@ impl State {
                 self.check_banker(&banker)?;
                 self.balance.commit_asset_removal(&player, &asset, count)
             },
-            Action::WithdrawalRequested { player, assets} => {
+            Action::RequestWithdrawal { player, assets} => {
                 // Shared accounts cannot directly withdraw
                 if !player.is_unshared() {
                     return Err(Error::UnsharedOnly)
@@ -752,7 +728,7 @@ impl State {
 
                 Ok(())
             },
-            Action::WithdrawalCompleted { target, banker } => {
+            Action::CompleteWithdrawal { target, banker } => {
                 self.check_banker(&banker)?;
                 // Try to take out the pending transaction
                 self.withdrawal.complete(target)?;
@@ -790,13 +766,6 @@ impl State {
                 Ok(())
             },
             Action::UpdateRestricted { restricted_assets} => {
-                // Check they're valid assets
-                if let Some(asset) =
-                    restricted_assets.iter()
-                    .find(|id| !self.asset_info.contains_key(*id))
-                {
-                    return Err(Error::UnknownAsset { asset: asset.clone() });
-                }
                 // A list of the assets that just became restricted
                 let newly_restricted = restricted_assets.difference(self.auth.get_restricted()).cloned().collect::<Vec<_>>();
                 self.auth.update_restricted(restricted_assets);
@@ -810,10 +779,7 @@ impl State {
                 Ok(())
             },
             Action::AuthoriseRestricted { authorisee, asset, new_count } => {
-                // Check it's a valid asset (not necessarily authorisable to enable pre-authorisation)
-                if !self.asset_info.contains_key(&asset) {
-                    return Err(Error::UnknownAsset { asset });
-                }
+                // We don't need to check that it is authorisable, so that we can do pre-authorisation)
                 self.auth.set_authorisation(authorisee, asset, new_count);
                 Ok(())
             },
@@ -1026,7 +992,6 @@ impl TryFrom<StateSync> for State {
             next_id: value.current_id.checked_add(1).ok_or(Error::Overflow)?,
             rates: value.rates,
             balance: value.balance.try_into()?,
-            asset_info: DEFAULT_ASSET_INFO.clone(),
             order: value.order.try_into()?,
             withdrawal: value.withdrawal.try_into()?,
             auth: value.auth.try_into()?,

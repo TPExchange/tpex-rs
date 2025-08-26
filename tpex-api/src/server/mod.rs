@@ -5,16 +5,15 @@ pub mod tokens;
 pub mod state;
 
 use axum::{extract::{ws::rejection::WebSocketUpgradeRejection, FromRequestParts}, response::IntoResponse, serve::Listener, Router};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite};
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
-use tpex::{ActionLevel, AssetId, AssetInfo, StateSync};
+use tpex::{ActionLevel, StateSync};
 #[derive(clap::Parser)]
 pub struct Args {
     pub trades: std::path::PathBuf,
     pub db: String,
     pub endpoint: String,
-    pub assets: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug)]
@@ -246,9 +245,7 @@ pub async fn run_server<L: Listener>(
     cancel: CancellationToken,
     mut trade_log: impl AsyncWrite + AsyncBufRead + AsyncSeek + Unpin + Send + Sync + 'static,
     token_handler: tokens::TokenHandler,
-    listener: L,
-    assets: Option<std::collections::HashMap<AssetId, AssetInfo>>)
-    where L::Addr : Debug
+    listener: L) where L::Addr : Debug
 {
     // Load cache
     let mut cache = Vec::new();
@@ -263,9 +260,6 @@ pub async fn run_server<L: Listener>(
     }
 
     let mut tpex_state = tpex::State::new();
-    if let Some(assets) = assets {
-        tpex_state.update_asset_info(assets)
-    }
     tpex_state.replay(&mut trade_log, true).await.expect("Could not replay trades");
 
     let (updated, _) = tokio::sync::watch::channel(tpex_state.get_next_id().checked_sub(1).expect("Poll counter underflow"));
@@ -316,16 +310,6 @@ pub async fn run_server_with_args(args: Args, cancel: CancellationToken) {
             .create(true)
             .open(args.trades).await.expect("Unable to open trade list")),
         tokens::TokenHandler::new(&args.db).await.expect("Could not connect to DB"),
-        tokio::net::TcpListener::bind(args.endpoint).await.expect("Could not bind to endpoint"),
-        match args.assets {
-            Some(asset_path) => {
-                let mut assets = String::new();
-                tokio::fs::File::open(asset_path).await.expect("Unable to open asset info")
-                .read_to_string(&mut assets).await.expect("Unable to read asset list");
-
-                Some(serde_json::from_str(&assets).expect("Unable to parse asset info"))
-            },
-            None=> None
-        }
+        tokio::net::TcpListener::bind(args.endpoint).await.expect("Could not bind to endpoint")
     ).await
 }

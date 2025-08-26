@@ -39,8 +39,7 @@ impl RunningServer {
             cancel.clone(),
             trade_log,
             TokenHandler::new(database.path().to_str().expect("Got wacky tempfile name")).await.expect("Failed to create TokenHandler"),
-            listener,
-            None
+            listener
         ));
         RunningServer {
             cancel: cancel.drop_guard(),
