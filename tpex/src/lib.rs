@@ -26,6 +26,14 @@ pub use coins::Coins;
 pub use shared_account::SharedId;
 pub use etp::ETPId;
 
+/// Checks whether `x` is a safe name (i.e. free from annoying bs that could hack us)
+///
+/// This will reject a lot of valid IDs, so it should only be used for something that cannot be decomposed further
+/// (i.e. for parts of an SharedId, not for a PlayerId)
+pub fn is_safe_name(x: &str) -> bool {
+    x.chars().all(|i| i.is_ascii_alphanumeric() || i == '_' || i == '+' || i == '-')
+}
+
 pub const DIAMOND_NAME: &str = "diamond";
 pub const DIAMOND_RAW_COINS: Coins = Coins::from_coins(1000);
 
@@ -100,6 +108,17 @@ pub enum Action {
         /// The banker who performed the deposit
         banker: PlayerId,
     },
+    /// Used to correct typos
+    Undeposit {
+        /// The player who should have the items taken away
+        player: PlayerId,
+        /// The asset to remove
+        asset: AssetId,
+        /// The amount of those items to be removed
+        count: u64,
+        /// The banker who submitted this action
+        banker: PlayerId
+    },
     /// Player asked to withdraw assets
     RequestWithdrawal {
         /// The player who requested the withdrawal
@@ -109,6 +128,13 @@ pub enum Action {
     },
     /// A banker has agreed to take out assets imminently
     CompleteWithdrawal {
+        /// The ID of the corresponding RequestWithdrawal transaction
+        target: u64,
+        /// The banker who confirmed it
+        banker: PlayerId,
+    },
+    /// A banker has confirmed that these assets have not, and will not, be withdrawn
+    CancelWithdrawal {
         /// The ID of the corresponding RequestWithdrawal transaction
         target: u64,
         /// The banker who confirmed it
@@ -199,17 +225,6 @@ pub enum Action {
     CancelOrder {
         /// The transaction ID of the order to cancel
         target: u64
-    },
-    /// Used to correct typos
-    Undeposit {
-        /// The player who should have the items taken away
-        player: PlayerId,
-        /// The asset to remove
-        asset: AssetId,
-        /// The amount of those items to be removed
-        count: u64,
-        /// The banker who submitted this action
-        banker: PlayerId
     },
     /// Creates or updates a shared account
     CreateOrUpdateShared {
@@ -587,6 +602,7 @@ impl State {
             Action::Deleted { banker, .. } |
             Action::Deposit { banker, .. } |
             Action::CompleteWithdrawal { banker, .. } |
+            Action::CancelWithdrawal { banker, .. } |
             Action::Undeposit { banker, .. }
                 => Ok(ActionPermissions{level: ActionLevel::Banker, player: banker.clone()}),
 
@@ -686,9 +702,20 @@ impl State {
                 }
 
                 // Register the withdrawal. This cannot fail, so we don't have to worry about atomicity
-                self.withdrawal.track_withdrawal(id, player, assets);
+                self.withdrawal.track(id, player, assets);
                 Ok(())
             },
+            Action::CancelWithdrawal { target, banker } => {
+                self.check_banker(&banker)?;
+                // Stop tracking the withdrawal
+                let withdrawal = self.withdrawal.finalise(target)?;
+                // Credit the account and reauthorise the assets
+                for (asset, count) in withdrawal.assets {
+                    self.balance.commit_asset_add(&withdrawal.player, &asset, count);
+                    self.auth.increase_authorisation(withdrawal.player.clone(), asset.clone(), count).expect("Authorisation overflow in cancelled order");
+                }
+                Ok(())
+            }
             Action::SellOrder { player, asset, count, coins_per } => {
                 // Check and take their assets first
                 self.balance.commit_asset_removal(&player, &asset, count)?;
@@ -731,7 +758,7 @@ impl State {
             Action::CompleteWithdrawal { target, banker } => {
                 self.check_banker(&banker)?;
                 // Try to take out the pending transaction
-                self.withdrawal.complete(target)?;
+                self.withdrawal.finalise(target)?;
                 Ok(())
             },
             Action::CancelOrder { target } => {

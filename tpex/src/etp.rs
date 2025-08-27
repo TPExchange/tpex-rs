@@ -2,7 +2,7 @@ use std::{fmt::Display, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AssetId, SharedId};
+use crate::{is_safe_name, AssetId, SharedId};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ETPId {
@@ -11,9 +11,14 @@ pub struct ETPId {
 }
 
 impl ETPId {
+    /// Checks if an asset id is a etp id
+    pub fn is_etp(id: &AssetId) -> bool {
+        id.starts_with("/")
+    }
+
     /// Creates an ETPId from the given parameters, ensuring that the name is valid
     pub fn try_new(issuer: SharedId, name: String) -> Result<ETPId, (SharedId, String)> {
-        if name.contains('%') {
+        if !is_safe_name(&name) {
             return Err((issuer, name))
         }
         Ok(ETPId { issuer, name })
@@ -52,10 +57,7 @@ impl FromStr for ETPId {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (issuer, name) = s.split_once('%').ok_or(crate::Error::InvalidETPId)?;
         let issuer = SharedId::from_str(issuer).map_err(|_| crate::Error::InvalidETPId)?;
-        Ok(Self {
-            name: name.to_owned(),
-            issuer
-        })
+        Self::try_new(issuer, name.into()).map_err(|_| crate::Error::InvalidETPId)
     }
 }
 impl Display for ETPId {

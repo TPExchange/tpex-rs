@@ -606,8 +606,6 @@ async fn lifecycle() {
         }
     ).await;
 
-
-
     let sync: StateSync = (&state.state).into();
     let sync_json = serde_json::to_string(&sync).expect("Failed to JSONise StateSync");
     println!("State: {:?}", state.state);
@@ -1461,5 +1459,65 @@ async fn issue_etp() {
         ExpectedState {
             ..Default::default()
         }
+    ).await;
+}
+
+#[tokio::test]
+async fn withdrawal() {
+    let asset = AssetId::from("cobblestone");
+    let mut state = MatchStateWrapper {
+        state: State::new(),
+        sink: WriteSink::default(),
+        players: [player(1)]
+    };
+    // Deposit some item
+    state.assert_state(
+        Action::Deposit {
+            player: player(1),
+            asset: asset.clone(),
+            count: 64,
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState { assets: vec![(player(1), asset.clone(), 64)], ..Default::default() }
+    ).await;
+    // Request a withdrawal
+    let id = state.assert_state(
+        Action::RequestWithdrawal {
+            player: player(1),
+            assets: [(asset.clone(), 32)].into(),
+        },
+        ExpectedState { assets: vec![(player(1), asset.clone(), 32)], ..Default::default() }
+    ).await.unwrap();
+    // Cancel the withdrawal
+    state.assert_state(
+        Action::CancelWithdrawal {
+            target: id,
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState { assets: vec![(player(1), asset.clone(), 64)], ..Default::default() }
+    ).await;
+    // Request a withdrawal again
+    let id = state.assert_state(
+        Action::RequestWithdrawal {
+            player: player(1),
+            assets: [(asset.clone(), 16)].into(),
+        },
+        ExpectedState { assets: vec![(player(1), asset.clone(), 48)], ..Default::default() }
+    ).await.unwrap();
+    // Complete the withdrawal
+    state.assert_state(
+        Action::CompleteWithdrawal {
+            target: id,
+            banker: PlayerId::the_bank()
+        },
+        ExpectedState { assets: vec![(player(1), asset.clone(), 48)], ..Default::default() }
+    ).await;
+    // Request an invalid withdrawal
+    state.assert_state(
+        Action::RequestWithdrawal {
+            player: player(1),
+            assets: [(asset.clone(), 64)].into(),
+        },
+        ExpectedState { assets: vec![(player(1), asset.clone(), 48)], should_fail: true, ..Default::default() }
     ).await;
 }

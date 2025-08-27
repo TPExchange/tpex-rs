@@ -6,7 +6,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use serde::de::Error;
 
-use crate::{Action, PlayerId};
+use crate::{is_safe_name, Action, PlayerId};
 
 #[repr(transparent)]
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
@@ -102,14 +102,16 @@ impl TryFrom<PlayerId> for SharedId {
     fn try_from(value: PlayerId) -> Result<Self, Self::Error> {
         // It's the bank!
         if value.get_raw_name() == "/" {
-            return Ok(SharedId(value))
+            return Ok(SharedId(value));
         }
         if !value.0.starts_with('/') || value.0.ends_with('/') || value.0.contains("//") {
-            Err(value)
+            return Err(value);
         }
-        else {
-            Ok(Self(value))
+        let ret = Self(value);
+        if !ret.parts().all(is_safe_name) {
+            return Err(ret.0);
         }
+        Ok(ret)
     }
 }
 impl From<SharedId> for PlayerId {

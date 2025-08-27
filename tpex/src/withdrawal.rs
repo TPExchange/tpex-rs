@@ -73,11 +73,12 @@ impl WithdrawalTracker {
     pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawal> {
         self.pending_withdrawals.values().next().cloned()
     }
-    pub fn track_withdrawal(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>) {
+    pub fn track(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>)  {
         self.pending_withdrawals.insert(id, PendingWithdrawal{ id, player, assets: assets.clone() });
-        self.current_audit += Audit{coins: Coins::default(), assets}
+        self.current_audit += Audit{coins: Coins::default(), assets};
     }
-    pub fn complete(&mut self, id: u64) -> Result<PendingWithdrawal, Error> {
+    /// Stops tracking the withdrawal, either for a completion or a cancel
+    pub fn finalise(&mut self, id: u64) -> Result<PendingWithdrawal, Error> {
         // Try to take out the pending transaction
         let Some(res) = self.pending_withdrawals.remove(&id)
         else { return Err(Error::InvalidId{id}); };
