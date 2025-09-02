@@ -169,9 +169,7 @@ pub(crate) enum CancelResult {
 pub(crate) struct OrderTracker {
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 
-    /// XXX: this contains cancelled orders, skip over them
     best_buy: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
-    /// XXX: this contains cancelled orders, skip over them
     best_sell: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
 
     current_audit: Audit
@@ -198,7 +196,7 @@ impl OrderTracker {
                 orders
                     .iter()
                     .cloned()
-                    .filter_map(|id| self.orders.get(&id).map(|x| x.amount_remaining))
+                    .map(|id| self.orders[&id].amount_remaining)
                     // We have None here iff there are no non-canceled orders
                     .reduce(|a,b| a+b)
                     .map(|amount| (*level, amount))
@@ -213,7 +211,7 @@ impl OrderTracker {
                 orders
                     .iter()
                     .cloned()
-                    .filter_map(|id| self.orders.get(&id).map(|x| x.amount_remaining))
+                    .map(|id| self.orders[&id].amount_remaining)
                     // We have None here iff there are no non-canceled orders
                     .reduce(|a,b| a+b)
                     .map(|amount| (*level, amount))
@@ -223,7 +221,7 @@ impl OrderTracker {
         (buy_levels, sell_levels)
     }
 
-    /// Generic function to match buy and sell orders, investments, etc
+    /// Generic function to match buy and sell orders
     fn do_match<T>(count: u64, mut elems: impl Iterator<Item = (u64, T)>) -> (u64, Vec<MatchResult<T>>) {
         let mut amount_remaining = count;
         let mut ret = Vec::new();
@@ -312,10 +310,8 @@ impl OrderTracker {
         // Match the orders
         let iter = self.iterate_best_sell(asset, coins_per)
             .map(|idx| {
-                match self.orders.get(&idx) {
-                    Some(order) => (order.amount_remaining, Some(order.clone())),
-                    None => (0, None)
-                }
+                let order = &self.orders[&idx];
+                (order.amount_remaining, Some(order.clone()))
             });
         let (amount_remaining, orders) = Self::do_match(count, iter);
 
@@ -379,10 +375,8 @@ impl OrderTracker {
         // Then match the orders
         let iter = self.iterate_best_buy(asset, coins_per)
             .map(|idx| {
-                match self.orders.get(&idx) {
-                    Some(order) => (order.amount_remaining, Some(order.clone())),
-                    None => (0, None)
-                }
+                let order = &self.orders[&idx];
+                (order.amount_remaining, Some(order.clone()))
             });
         let (amount_remaining, orders) = Self::do_match(count, iter);
 
@@ -447,13 +441,41 @@ impl OrderTracker {
                         .fee_ppm(1_000_000_u64.checked_add(found.fee_ppm).expect("Order cancel fee overflow")).expect("Order cancel fee overflow");
                     // ... we are no longer responsible for the refunded coins ...
                     self.current_audit.sub_coins(refund_coins);
-                    // ... and refund the money ...
+                    // ... remove it from the order list ...
+                    {
+                        let levels = self.best_buy.get_mut(&found.asset).expect("Failed to find asset in cancel buy");
+                        let std::collections::btree_map::Entry::Occupied(mut target) = levels.entry(found.coins_per)
+                        else { unreachable!("Failed to find level in cancel buy") };
+                        let target_val = target.get_mut();
+                        target_val.remove(target_val.iter().position(|i| *i == target_id).expect("Failed to find order in cancel buy"));
+                        if target_val.is_empty() {
+                            target.remove();
+                        }
+                        if levels.is_empty() {
+                            self.best_buy.remove(&found.asset);
+                        }
+                    }
+                    // ... and refund the money
                     Ok(CancelResult::BuyOrder { player: found.player, refund_coins })
                 },
                 // If we found it as a sell...
                 OrderType::Sell => {
                     // ... we are no longer responsible for the refunded assets ...
                     self.current_audit.sub_asset(found.asset.clone(), found.amount_remaining);
+                    // ... remove it from the order list ...
+                    {
+                        let levels = self.best_sell.get_mut(&found.asset).expect("Failed to find asset in cancel sell");
+                        let std::collections::btree_map::Entry::Occupied(mut target) = levels.entry(found.coins_per)
+                        else { unreachable!("Failed to find level in cancel sell") };
+                        let target_val = target.get_mut();
+                        target_val.remove(target_val.iter().position(|i| *i == target_id).expect("Failed to find order in cancel sell"));
+                        if target_val.is_empty() {
+                            target.remove();
+                        }
+                        if levels.is_empty() {
+                            self.best_sell.remove(&found.asset);
+                        }
+                    }
                     // ... and refund the assets
                     Ok(CancelResult::SellOrder { player: found.player, refunded_asset: found.asset, refund_count: found.amount_remaining })
                 }
