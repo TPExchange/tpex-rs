@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Duration};
 
 use crate::{shared::*, state_type};
 pub mod tokens;
@@ -119,8 +119,21 @@ async fn state_get(
         upgrade.on_upgrade(move |mut sock: axum::extract::ws::WebSocket| async move {
             let mut subscription = state.updated.subscribe();
             loop {
-                subscription.wait_for(|i| *i >= from).await.expect("Failed to poll updated_recv");
-
+                let should_ping = tokio::select! {
+                    new_actions = subscription.wait_for(|i| *i >= from) => {
+                        new_actions.expect("Failed to poll updated_recv");
+                        false
+                    },
+                    _timeout = tokio::time::sleep(Duration::from_secs(10)) => true
+                };
+                if should_ping {
+                    if sock.send(axum::extract::ws::Message::Ping(Default::default())).await.is_err() {
+                        break;
+                    }
+                    else {
+                        continue;
+                    }
+                }
                 let tpex_state_handle = state.tpex.read().await;
                 // It's better to clone these out than hold state
                 let res =
@@ -201,7 +214,21 @@ async fn fastsync_get(
             let mut subscription = state.updated.subscribe();
             subscription.mark_changed();
             loop {
-                subscription.changed().await.expect("Failed to poll updated_recv");
+                let should_ping = tokio::select! {
+                    new_actions = subscription.changed() => {
+                        new_actions.expect("Failed to poll updated_recv");
+                        false
+                    },
+                    _timeout = tokio::time::sleep(Duration::from_secs(10)) => true
+                };
+                if should_ping {
+                    if sock.send(axum::extract::ws::Message::Ping(Default::default())).await.is_err() {
+                        break;
+                    }
+                    else {
+                        continue;
+                    }
+                }
                 let res = StateSync::from(state.tpex.read().await.state());
                 if sock.send(axum::extract::ws::Message::Text(serde_json::to_string(&res).expect("Could not serialise state sync").into())).await.is_err() {
                     break;

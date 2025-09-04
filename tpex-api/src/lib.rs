@@ -6,7 +6,9 @@ mod shared;
 #[cfg(feature="server")]
 pub mod server;
 
-use futures::{StreamExt, TryStreamExt};
+use std::sync::Arc;
+
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use reqwest::StatusCode;
 use reqwest_websocket::{Message, RequestBuilderExt};
 pub use shared::*;
@@ -87,20 +89,25 @@ impl Remote {
         target.query_pairs_mut().append_pair("from", &from.to_string());
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
 
-        let ws = self.client.get(target)
+        let (sink, stream) = self.client.get(target)
             .upgrade()
             .send().await?
-            .into_websocket().await?;
+            .into_websocket().await?
+            .split();
+        let sink = Arc::new(tokio::sync::Mutex::new(sink));
 
-        Ok(ws.filter_map(|msg| async {
-            let ret: Option<Result<tpex::WrappedAction>> = match msg {
+        Ok(stream.filter_map(move |msg| { let sink = sink.clone(); async move {
+            match msg {
                 Ok(Message::Text(text)) => Some(serde_json::from_str(&text).map_err(|_| Error::Unknown(None))),
                 Ok(Message::Binary(binary)) => Some(serde_json::from_slice(&binary).map_err(|_| Error::Unknown(None))),
+                Ok(Message::Ping(payload)) => {
+                    let _ = sink.lock().await.send(Message::Pong(payload)).await;
+                    None
+                }
                 Err(e) => Some(Err(e.into())),
                 _ => None
-            };
-            ret
-        }))
+            }
+        }}))
     }
     pub async fn apply(&self, action: &tpex::Action) -> Result<u64> {
         let mut target = self.endpoint.clone();
@@ -136,20 +143,25 @@ impl Remote {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /fastsync").push("fastsync");
 
-        let ws = self.client.get(target)
+        let (sink, stream) = self.client.get(target)
             .upgrade()
             .send().await?
-            .into_websocket().await?;
+            .into_websocket().await?
+            .split();
+        let sink = Arc::new(tokio::sync::Mutex::new(sink));
 
-        Ok(ws.filter_map(|msg| async {
-            let ret: Option<Result<tpex::StateSync>> = match msg {
+        Ok(stream.filter_map(move |msg| { let sink = sink.clone(); async move {
+            match msg {
                 Ok(Message::Text(text)) => Some(serde_json::from_str(&text).map_err(|_| Error::Unknown(None))),
                 Ok(Message::Binary(binary)) => Some(serde_json::from_slice(&binary).map_err(|_| Error::Unknown(None))),
+                Ok(Message::Ping(payload)) => {
+                    let _ = sink.lock().await.send(Message::Pong(payload)).await;
+                    None
+                }
                 Err(e) => Some(Err(e.into())),
                 _ => None
-            };
-            ret
-        }))
+            }
+        }}))
     }
     pub async fn get_balance(&self, player: &tpex::PlayerId) -> Result<tpex::Coins> {
         let mut target = self.endpoint.clone();
