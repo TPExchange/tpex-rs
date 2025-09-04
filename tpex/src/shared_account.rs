@@ -8,6 +8,9 @@ use serde::de::Error;
 
 use crate::{is_safe_name, Action, PlayerId};
 
+/// The checked name of a shared acount, with path syntax
+///
+/// i.e. If /foo creates an account bar, then it will be called /foo/bar
 #[repr(transparent)]
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct SharedId(PlayerId);

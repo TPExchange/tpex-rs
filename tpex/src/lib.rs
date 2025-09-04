@@ -328,6 +328,9 @@ impl Action {
                 audit.sub_asset(product.into(), *count);
                 Some(audit)
             },
+            Action::Propose { action, .. } => {
+                action.adjust_audit(audit)
+            }
             _ => Some(audit)
         }
     }
