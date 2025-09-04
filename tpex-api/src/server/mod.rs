@@ -114,7 +114,7 @@ async fn state_get(
     axum_extra::extract::OptionalQuery(args): axum_extra::extract::OptionalQuery<StateGetArgs>,
     OptionalWebSocket(upgrade): OptionalWebSocket
 ) -> axum::response::Response {
-    let mut from = args.unwrap_or_default().from.unwrap_or(0);
+    let mut from = args.unwrap_or_default().from.unwrap_or(1);
     if let Some(upgrade) = upgrade {
         upgrade.on_upgrade(move |mut sock: axum::extract::ws::WebSocket| async move {
             let mut subscription = state.updated.subscribe();
@@ -125,12 +125,12 @@ async fn state_get(
                 // It's better to clone these out than hold state
                 let res =
                     tpex_state_handle.cache().iter()
-                    .skip(from as usize)
+                    .skip((from as usize).saturating_sub(1))
                     .map(Into::into)
                     .map(axum::extract::ws::Message::Text)
                     .collect::<Vec<_>>();
                 // rechecking the id prevents a race condition
-                from = tpex_state_handle.state().get_next_id() - 1;
+                from = tpex_state_handle.state().get_next_id();
                 // We have extracted all we need
                 drop(tpex_state_handle);
                 // Send it off

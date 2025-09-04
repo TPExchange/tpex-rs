@@ -137,6 +137,8 @@ async fn stream_state() {
     });
     let mut stream = std::pin::pin!(stream);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
+    assert_eq!(wrapped.action, actions[0]);
+    let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.action, actions[1]);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.action, actions[2]);
@@ -186,6 +188,8 @@ async fn mirrored_stream_state() {
         }
     });
     let mut stream = std::pin::pin!(stream);
+    let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
+    assert_eq!(wrapped.1.action, actions[0]);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.1.action, actions[1]);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");

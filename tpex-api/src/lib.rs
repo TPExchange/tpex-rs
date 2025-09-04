@@ -108,11 +108,11 @@ impl Remote {
 
         Ok(Self::check_response(self.client.patch(target).json(action).send().await?).await?.json().await?)
     }
-    pub async fn get_token(&self, token: &Token) -> Result<TokenInfo> {
+    pub async fn get_token(&self) -> Result<TokenInfo> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        Ok(Self::check_response(self.client.post(target).json(token).send().await?).await?.json().await?)
+        Ok(Self::check_response(self.client.post(target).send().await?).await?.json().await?)
     }
     pub async fn create_token(&self, args: &TokenPostArgs) -> Result<Token> {
         let mut target = self.endpoint.clone();
@@ -197,6 +197,9 @@ impl Mirrored {
         state.replay(&mut buf, true).await.expect("State unable to replay");
         Ok(state.downgrade())
     }
+    pub async fn unsynced(&'_ self) -> tokio::sync::RwLockReadGuard<'_, State> {
+        self.state.read().await
+    }
     pub async fn apply(&self, action: tpex::Action) -> Result<u64> {
         // The remote could be desynced, so we send our update
         let id = self.remote.apply(&action).await?;
@@ -208,7 +211,12 @@ impl Mirrored {
         let this: std::sync::Arc<Self> = self.clone();
         let stream = self.remote.stream_state(next_id).await?;
         Ok(stream.and_then(move |wrapped_action| { let this = this.clone(); async move  {
-            this.state.write().await.apply(wrapped_action.action.clone(), tokio::io::sink()).await?;
+            let mut state = this.state.write().await;
+            if state.get_next_id() != wrapped_action.id {
+                return Err(tpex::Error::InvalidId { id: wrapped_action.id }.into());
+            }
+            state.apply(wrapped_action.action.clone(), tokio::io::sink()).await?;
+            drop(state);
             Ok((this, wrapped_action))
         }}))
     }
