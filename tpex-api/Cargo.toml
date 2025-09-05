@@ -46,6 +46,12 @@ name = "tpex-srv"
 path = "src/bin.rs"
 required-features = ["server"]
 
+[[bin]]
+name = "tpex-mirror"
+path = "src/mirror.rs"
+required-features = ["client"]
+
+
 [lib]
 name = "tpex_api"
 path = "src/lib.rs"

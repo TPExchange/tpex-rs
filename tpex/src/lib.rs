@@ -328,9 +328,14 @@ impl Action {
                 audit.sub_asset(product.into(), *count);
                 Some(audit)
             },
-            // We don't know what effect this will have
-            Action::Propose { ... } => {
-                None
+            Action::Propose { action, .. } => {
+                match action.adjust_audit(audit.clone()) {
+                    // If the proposal isn't going to change the total amount of stuff even if it goes through,
+                    // then we can confidently assert that the total amount of stuff shouldn't change
+                    Some(result) if result == audit => Some(audit),
+                    // Otherwise, we don't know what effect this will have
+                    _ => None
+                }
             }
             _ => Some(audit)
         }
