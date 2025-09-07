@@ -946,12 +946,12 @@ impl State {
         }
         Ok(())
     }
-    /// Atomically try to apply an action, and if successful, write to given stream
-    pub async fn apply(&mut self, action: Action, out: impl tokio::io::AsyncWrite) -> Result<u64> {
+    /// Atomically try to apply an action with a give time, and if successful, write to given stream
+    pub async fn apply_with_time<Tz: chrono::TimeZone>(&mut self, action: Action, time: chrono::DateTime<Tz>, out: impl tokio::io::AsyncWrite) -> Result<u64> {
         let id = self.next_id;
         let wrapped_action = WrappedAction {
             id,
-            time: chrono::offset::Utc::now(),
+            time: time.to_utc(),
             action: action.clone(),
         };
         let mut line = serde_json::to_string(&wrapped_action).expect("Cannot serialise action");
@@ -970,6 +970,10 @@ impl State {
         out.write_all(line.as_bytes()).await.expect("Could not write to log, must immediately stop!");
         out.flush().await.expect("Could not flush to log, must immediately stop!");
         Ok(id)
+    }
+    /// Atomically try to apply an action, and if successful, write to given stream
+    pub fn apply(&mut self, action: Action, out: impl tokio::io::AsyncWrite) -> impl Future<Output=Result<u64>> {
+        self.apply_with_time(action, chrono::Utc::now(), out)
     }
 }
 impl Auditable for State {

@@ -183,6 +183,13 @@ impl Remote {
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
+    pub async fn price_history(&self, asset: &AssetId) -> Result<Vec<PriceChange>> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /price/history").push("price").push("history");
+        target.query_pairs_mut().append_pair("asset", asset);
+
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
+    }
 }
 
 pub struct Mirrored {

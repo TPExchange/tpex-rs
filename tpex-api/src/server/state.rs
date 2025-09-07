@@ -1,8 +1,9 @@
-use std::pin::pin;
+use std::{collections::HashMap, pin::pin};
 
 use tpex::Action;
 
 use super::tokens;
+use super::PriceChange;
 
 
 struct CachedFileView<Stream: tokio::io::AsyncWrite> {
@@ -77,6 +78,7 @@ pub(crate) struct StateStruct<Stream: tokio::io::AsyncSeek + tokio::io::AsyncWri
     pub(crate) tpex: tokio::sync::RwLock<TPExState<Stream>>,
     pub(crate) tokens: tokens::TokenHandler,
     pub(crate) updated: tokio::sync::watch::Sender<u64>,
+    pub(crate) price_history: tokio::sync::RwLock<HashMap<tpex::AssetId, Vec<PriceChange>>>
 }
 #[macro_export]
 macro_rules! state_type {

@@ -101,7 +101,7 @@ impl<'de> Deserialize<'de> for Token {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenInfo {
     pub token: Token,
@@ -109,45 +109,84 @@ pub struct TokenInfo {
     pub level: TokenLevel
 }
 
+#[derive(Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenPostArgs {
     pub level: TokenLevel,
     pub user: PlayerId
 }
 
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenDeleteArgs {
     pub token: Option<Token>
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StateGetArgs {
     pub from: Option<u64>
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StatePatchArgs {
     pub id: Option<u64>
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ErrorInfo {
     pub error: String
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct PollGetArgs {
     pub id: u64
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InspectBalanceGetArgs {
     pub player: PlayerId
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InspectAssetsGetArgs {
     pub player: PlayerId
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PriceChangeCause {
+    Buy,
+    Sell,
+    Cancel
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PriceChange {
+    pub time: chrono::DateTime<chrono::Utc>,
+    pub best_buy: Option<tpex::Coins>,
+    pub n_buy: u64,
+    pub best_sell: Option<tpex::Coins>,
+    pub n_sell: u64,
+    pub cause: PriceChangeCause
+}
+impl PriceChange {
+    pub const fn mid_market(&self) -> Option<tpex::Coins> {
+        match (self.best_buy, self.best_sell) {
+            (Some(best_buy), Some(best_sell)) => Some(tpex::Coins::from_millicoins(best_buy.millicoins().saturating_add(best_sell.millicoins()) / 2)),
+            (None, Some(x)) |
+            (Some(x), None) => Some(x),
+            (None, None) => None
+        }
+    }
+}
+impl PartialEq for PriceChange {
+    fn eq(&self, other: &Self) -> bool {
+        self.best_buy == other.best_buy && self.n_buy == other.n_buy && self.best_sell == other.best_sell && self.n_sell == other.n_sell && self.cause == other.cause
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceHistoryArgs {
+    pub asset: tpex::AssetId,
 }

@@ -69,6 +69,7 @@ async fn state_patch(
         TokenLevel::ProxyAll => ()
     }
     let mut tpex_state = state.tpex.write().await;
+    // TODO: Read out the price history data
     let id =
         if let Some(expected_id) = args.and_then(|i| i.id) {
             let next_id = tpex_state.state().get_next_id();
@@ -265,6 +266,14 @@ async fn inspect_audit_get(
     axum::Json(state.tpex.read().await.state().itemised_audit()).into_response()
 }
 
+async fn price_history_get(
+    axum::extract::State(state): axum::extract::State<state_type!()>,
+    _token: TokenInfo,
+    axum::extract::Query(args): axum::extract::Query<PriceHistoryArgs>
+) -> axum::response::Response {
+    axum::Json(state.price_history.read().await.get(&args.asset).unwrap_or(&Vec::default())).into_response()
+}
+
 pub async fn run_server<L: Listener>(
     cancel: CancellationToken,
     mut trade_log: impl AsyncWrite + AsyncBufRead + AsyncSeek + Unpin + Send + Sync + 'static,
@@ -290,7 +299,8 @@ pub async fn run_server<L: Listener>(
     let state = state::StateStruct {
         tpex: tokio::sync::RwLock::new(state::TPExState::new(tpex_state, trade_log, cache)),
         tokens: token_handler,
-        updated
+        updated,
+        price_history: Default::default()
     };
 
     let cors = tower_http::cors::CorsLayer::new()
@@ -313,6 +323,8 @@ pub async fn run_server<L: Listener>(
         .route("/inspect/balance", axum::routing::get(inspect_balance_get))
         .route("/inspect/assets", axum::routing::get(inspect_assets_get))
         .route("/inspect/audit", axum::routing::get(inspect_audit_get))
+
+        .route("/price/history", axum::routing::get(price_history_get))
 
         .with_state(std::sync::Arc::new(state))
 
