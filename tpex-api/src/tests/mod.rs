@@ -7,7 +7,7 @@ use tokio_util::sync::DropGuard;
 use tpex::{AssetId, PlayerId, WrappedAction};
 use tracing_subscriber::EnvFilter;
 
-use crate::{server::{self, tokens::TokenHandler}, Mirrored, Remote, Token, TokenLevel};
+use crate::{server::{self, tokens::TokenHandler}, Mirrored, PriceSummary, Remote, Token, TokenLevel};
 
 fn player(n: u64) -> PlayerId { PlayerId::assume_username_correct(n.to_string()) }
 
@@ -288,4 +288,162 @@ async fn test_inspect() {
 
     // Test audit
     assert_eq!(client.itemised_audit().await.expect("Failed to get itemised audit"), tpex::State::try_from(client.fastsync().await.expect("Failed to fastsync")).expect("Bad fastsync").itemised_audit())
+}
+
+
+#[tokio::test]
+async fn test_price_history() {
+    let server = RunningServer::start_server().await;
+    let client = Remote::new(server.url, server.token);
+    client.apply(&tpex::Action::Deposit {
+        player: player(1),
+        asset: tpex::DIAMOND_NAME.into(),
+        count: 100,
+        banker: tpex::PlayerId::the_bank()
+    }).await.expect("Failed to deposit diamonds");
+    client.apply(&tpex::Action::BuyCoins {
+        player: player(1),
+        n_diamonds: 100,
+    }).await.expect("Failed to buy coins");
+    let asset = "cobblestone".to_owned();
+    let not_asset = "stone".to_owned();
+    assert!(client.price_history(&asset).await.expect("Could not get price history").is_empty(), "Price history changed after deposit");
+    client.apply(&tpex::Action::Deposit {
+        player: player(1),
+        asset: asset.clone(),
+        count: 100,
+        banker: tpex::PlayerId::the_bank()
+    }).await.expect("Failed to deposit cobblestone");
+    client.apply(&tpex::Action::Deposit {
+        player: player(1),
+        asset: not_asset.clone(),
+        count: 100,
+        banker: tpex::PlayerId::the_bank()
+    }).await.expect("Failed to deposit stone");
+    assert!(client.price_history(&asset).await.expect("Could not get price history").is_empty(), "Price history changed after deposit");
+    client.apply(&tpex::Action::BuyOrder {
+        player: player(1),
+        asset: not_asset.clone(),
+        count: 1,
+        coins_per: tpex::Coins::from_coins(1)
+    }).await.expect("Failed to buy order stone");
+    client.apply(&tpex::Action::SellOrder {
+        player: player(1),
+        asset: not_asset.clone(),
+        count: 1,
+        coins_per: tpex::Coins::from_coins(2)
+    }).await.expect("Failed to sell order stone");
+    assert!(client.price_history(&asset).await.expect("Could not get price history").is_empty(), "Price history changed after unreleated buy/sell orders");
+
+    // Initial prices
+    client.apply(&tpex::Action::BuyOrder {
+        player: player(1),
+        asset: asset.clone(),
+        count: 3,
+        coins_per: tpex::Coins::from_coins(2)
+    }).await.expect("Failed to buy order stone");
+    client.apply(&tpex::Action::SellOrder {
+        player: player(1),
+        asset: asset.clone(),
+        count: 7,
+        coins_per: tpex::Coins::from_coins(5)
+    }).await.expect("Failed to sell order stone");
+    // Worse prices
+    client.apply(&tpex::Action::BuyOrder {
+        player: player(1),
+        asset: asset.clone(),
+        count: 11,
+        coins_per: tpex::Coins::from_coins(1)
+    }).await.expect("Failed to buy order stone");
+    client.apply(&tpex::Action::SellOrder {
+        player: player(1),
+        asset: asset.clone(),
+        count: 13,
+        coins_per: tpex::Coins::from_coins(6)
+    }).await.expect("Failed to sell order stone");
+    // Better prices
+    client.apply(&tpex::Action::BuyOrder {
+        player: player(1),
+        asset: asset.clone(),
+        count: 1,
+        coins_per: tpex::Coins::from_coins(3)
+    }).await.expect("Failed to buy order stone");
+    client.apply(&tpex::Action::SellOrder {
+        player: player(1),
+        asset: asset.clone(),
+        count: 1,
+        coins_per: tpex::Coins::from_coins(4)
+    }).await.expect("Failed to sell order stone");
+    // Check prices
+    {
+        let fake_time = chrono::DateTime::from_timestamp_nanos(0);
+        let expected_price_history = [
+            crate::PriceSummary {
+                time: fake_time,
+                best_buy: Some(tpex::Coins::from_coins(2)),
+                n_buy: 3,
+                best_sell: None,
+                n_sell: 0,
+            },
+            crate::PriceSummary {
+                time: fake_time,
+                best_buy: Some(tpex::Coins::from_coins(2)),
+                n_buy: 3,
+                best_sell: Some(tpex::Coins::from_coins(5)),
+                n_sell: 7,
+            },
+            // Worse orders should not change price, only quantity
+            crate::PriceSummary {
+                time: fake_time,
+                best_buy: Some(tpex::Coins::from_coins(2)),
+                n_buy: 14,
+                best_sell: Some(tpex::Coins::from_coins(5)),
+                n_sell: 7,
+            },
+            crate::PriceSummary {
+                time: fake_time,
+                best_buy: Some(tpex::Coins::from_coins(2)),
+                n_buy: 14,
+                best_sell: Some(tpex::Coins::from_coins(5)),
+                n_sell: 20,
+            },
+            // Better orders should change price and quantity
+            crate::PriceSummary {
+                time: fake_time,
+                best_buy: Some(tpex::Coins::from_coins(3)),
+                n_buy: 15,
+                best_sell: Some(tpex::Coins::from_coins(5)),
+                n_sell: 20,
+            },
+            crate::PriceSummary {
+                time: fake_time,
+                best_buy: Some(tpex::Coins::from_coins(3)),
+                n_buy: 15,
+                best_sell: Some(tpex::Coins::from_coins(4)),
+                n_sell: 21,
+            },
+        ];
+        let measured_price_history = client.price_history(&asset).await.expect("Could not get price history");
+        assert_eq!(measured_price_history.len(), expected_price_history.len(), "Price history length mismatch");
+        for (expected, measured) in expected_price_history.iter().zip(measured_price_history) {
+            assert!(expected.same_prices_as(&measured), "History diverged: expected {expected:?}, got {measured:?}");
+        }
+        let expected_midmarket = [
+            tpex::Coins::from_millicoins(2000),
+            tpex::Coins::from_millicoins(3500),
+            tpex::Coins::from_millicoins(3500),
+            tpex::Coins::from_millicoins(3500),
+            tpex::Coins::from_millicoins(4000),
+            tpex::Coins::from_millicoins(3500),
+        ];
+        for (expected, measured) in expected_midmarket.into_iter().zip(expected_price_history.iter().map(|i| i.mid_market())) {
+            assert!(Some(expected) == measured, "Midmarket price is incorrect: expected {expected:?}, got {measured:?}");
+        }
+    }
+}
+
+#[test]
+fn test_midmarket_empty() {
+    let summary = PriceSummary { time: chrono::DateTime::default(), best_buy: None, n_buy: 0, best_sell: None, n_sell: 0 };
+    assert_eq!(summary.mid_market(), None);
 }

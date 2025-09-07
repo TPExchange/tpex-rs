@@ -161,16 +161,15 @@ pub enum PriceChangeCause {
     Cancel
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PriceChange {
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct PriceSummary {
     pub time: chrono::DateTime<chrono::Utc>,
     pub best_buy: Option<tpex::Coins>,
     pub n_buy: u64,
     pub best_sell: Option<tpex::Coins>,
-    pub n_sell: u64,
-    pub cause: PriceChangeCause
+    pub n_sell: u64
 }
-impl PriceChange {
+impl PriceSummary {
     pub const fn mid_market(&self) -> Option<tpex::Coins> {
         match (self.best_buy, self.best_sell) {
             (Some(best_buy), Some(best_sell)) => Some(tpex::Coins::from_millicoins(best_buy.millicoins().saturating_add(best_sell.millicoins()) / 2)),
@@ -179,10 +178,21 @@ impl PriceChange {
             (None, None) => None
         }
     }
-}
-impl PartialEq for PriceChange {
-    fn eq(&self, other: &Self) -> bool {
-        self.best_buy == other.best_buy && self.n_buy == other.n_buy && self.best_sell == other.best_sell && self.n_sell == other.n_sell && self.cause == other.cause
+    #[allow(unused)]
+    pub fn cause(&self, prev: &PriceSummary) -> PriceChangeCause {
+        match (self.n_buy > prev.n_buy, self.n_sell > prev.n_sell) {
+            // There's no way for both to increase, so we were not given the previous order
+            (true, true) => panic!("Passed invalid previous value to tpex_api::PriceSummary::cause"),
+            // If neither have increased, it was a cancel
+            (false, false) => PriceChangeCause::Cancel,
+            (true , false) => PriceChangeCause::Buy,
+            (false, true ) => PriceChangeCause::Sell
+        }
+    }
+    #[allow(unused)]
+    // Only checks to see if the actual price change is the same, not the time it took place
+    pub fn same_prices_as(&self, other: &PriceSummary) -> bool {
+        self.best_buy == other.best_buy && self.n_buy == other.n_buy && self.best_sell == other.best_sell && self.n_sell == other.n_sell
     }
 }
 

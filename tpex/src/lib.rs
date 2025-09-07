@@ -726,6 +726,9 @@ impl State {
                 Ok(())
             }
             Action::SellOrder { player, asset, count, coins_per } => {
+                if count == 0 {
+                    return Err(Error::AlreadyDone)
+                }
                 // Check and take their assets first
                 self.balance.commit_asset_removal(&player, &asset, count)?;
                 // Do the matching and listing
@@ -742,6 +745,9 @@ impl State {
                 Ok(())
             },
             Action::BuyOrder { player, asset, count, coins_per } => {
+                if count == 0 {
+                    return Err(Error::AlreadyDone)
+                }
                 // Check their money first
                 let mut max_cost = coins_per.checked_mul(count)?;
                 max_cost.checked_add_assign(max_cost.fee_ppm(self.rates.buy_order_ppm)?)?;
@@ -947,7 +953,7 @@ impl State {
         Ok(())
     }
     /// Atomically try to apply an action with a give time, and if successful, write to given stream
-    pub async fn apply_with_time<Tz: chrono::TimeZone>(&mut self, action: Action, time: chrono::DateTime<Tz>, out: impl tokio::io::AsyncWrite) -> Result<u64> {
+    pub async fn apply_with_time(&mut self, action: Action, time: chrono::DateTime<chrono::Utc>, out: impl tokio::io::AsyncWrite) -> Result<u64> {
         let id = self.next_id;
         let wrapped_action = WrappedAction {
             id,
