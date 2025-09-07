@@ -1,6 +1,6 @@
 [package]
 name = "tpex-api"
-version = "0.7.3"
+version = "0.7.4"
 edition = "2024"
 license = "GPL-3.0-only"
 description = "The TPEx API server and client implmentation"
