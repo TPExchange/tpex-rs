@@ -1549,11 +1549,11 @@ async fn test_zero_orders() {
         asset: asset.clone(),
         count: 0,
         coins_per: Coins::from_coins(1)
-    }, sink()).await.expect("Able to place zero buy order");
+    }, sink()).await.expect_err("Able to place zero buy order");
     state.apply(Action::SellOrder {
         player: player(1),
         asset: asset.clone(),
         count: 0,
         coins_per: Coins::from_coins(2)
-    }, sink()).await.expect("Able to place zero sell order");
+    }, sink()).await.expect_err("Able to place zero sell order");
 }
