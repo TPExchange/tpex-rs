@@ -96,7 +96,6 @@ impl<Stream: tokio::io::AsyncWrite + Unpin> TPExState<Stream> {
             };
             let target = self.price_history.entry(asset).or_default();
             target.push(new_elem);
-            println!("{:?}", self.price_history.get("cobblestone").cloned().unwrap_or_default().last().and_then(PriceSummary::mid_market));
         }
         self.cache.push(String::from_utf8(stream.extract()).expect("Produced non-utf8 log line"));
         Ok(ret)
