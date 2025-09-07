@@ -21,7 +21,7 @@ pub enum Error {
     RequestFailure(reqwest::Error),
     WebSocketFailure(reqwest_websocket::Error),
     TPExFailure(ErrorInfo),
-    Unknown(Option<StatusCode>)
+    Unknown(Option<StatusCode>),
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -180,6 +180,13 @@ impl Remote {
     pub async fn itemised_audit(&self) -> Result<tpex::ItemisedAudit> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /inspect/audit").push("inspect").push("audit");
+
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
+    }
+    pub async fn price_history(&self, asset: &AssetId) -> Result<Vec<PriceSummary>> {
+        let mut target = self.endpoint.clone();
+        target.path_segments_mut().expect("Unable to nav to /price/history").push("price").push("history");
+        target.query_pairs_mut().append_pair("asset", asset);
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }

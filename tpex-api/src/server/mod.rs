@@ -5,7 +5,7 @@ pub mod tokens;
 pub mod state;
 
 use axum::{extract::{ws::rejection::WebSocketUpgradeRejection, FromRequestParts}, response::IntoResponse, serve::Listener, Router};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite};
+use tokio::io::{AsyncBufRead, AsyncSeek, AsyncWrite};
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 use tpex::StateSync;
@@ -69,23 +69,29 @@ async fn state_patch(
         TokenLevel::ProxyAll => ()
     }
     let mut tpex_state = state.tpex.write().await;
+    // We have to do this *after* we lock, or else we could get out-of-order timing or with the time being out
+    //
+    // tbh we can get that anyway because we're using the system clock, but let's not make it worse, ok?
+    let now = chrono::Utc::now();
     let id =
         if let Some(expected_id) = args.and_then(|i| i.id) {
             let next_id = tpex_state.state().get_next_id();
             if next_id != expected_id {
                 return Err(Error::NotNextId{next_id});
             }
-            let id = tpex_state.apply(action).await?;
+            let id = tpex_state.apply(action, now).await?;
             assert_eq!(id, next_id, "Somehow got ID mismatch");
             id
         }
         else {
-            tpex_state.apply(action).await?
+            tpex_state.apply(action, now).await?
         };
     // We patched, so update the id
     //
     // We use send_replace so that we don't have to worry about if anyone's listening
     state.updated.send_replace(id);
+    // Finally, we can drop the lock
+    drop(tpex_state);
     Ok(axum::Json(id))
 }
 
@@ -265,32 +271,25 @@ async fn inspect_audit_get(
     axum::Json(state.tpex.read().await.state().itemised_audit()).into_response()
 }
 
+async fn price_history_get(
+    axum::extract::State(state): axum::extract::State<state_type!()>,
+    _token: TokenInfo,
+    axum::extract::Query(args): axum::extract::Query<PriceHistoryArgs>
+) -> axum::response::Response {
+    axum::Json(state.tpex.read().await.price_history().get(&args.asset).unwrap_or(&Vec::default())).into_response()
+}
+
 pub async fn run_server<L: Listener>(
     cancel: CancellationToken,
-    mut trade_log: impl AsyncWrite + AsyncBufRead + AsyncSeek + Unpin + Send + Sync + 'static,
+    trade_log: impl AsyncWrite + AsyncBufRead + AsyncSeek + Unpin + Send + Sync + 'static,
     token_handler: tokens::TokenHandler,
     listener: L) where L::Addr : Debug
 {
-    // Load cache
-    let mut cache = Vec::new();
-    {
-        let mut lines = trade_log.lines();
-        while let Some(mut line) = lines.next_line().await.expect("Could not read trade file") {
-            line.push('\n');
-            cache.push(line);
-        }
-        trade_log = lines.into_inner();
-        trade_log.rewind().await.expect("Could not rewind trade file");
-    }
-
-    let mut tpex_state = tpex::State::new();
-    tpex_state.replay(&mut trade_log, true).await.expect("Could not replay trades");
-
-    let (updated, _) = tokio::sync::watch::channel(tpex_state.get_next_id().checked_sub(1).expect("Poll counter underflow"));
+    let (updated, _) = tokio::sync::watch::channel(1);
     let state = state::StateStruct {
-        tpex: tokio::sync::RwLock::new(state::TPExState::new(tpex_state, trade_log, cache)),
+        tpex: tokio::sync::RwLock::new(state::TPExState::replay(trade_log).await.expect("Could not replace trades")),
         tokens: token_handler,
-        updated
+        updated,
     };
 
     let cors = tower_http::cors::CorsLayer::new()
@@ -313,6 +312,8 @@ pub async fn run_server<L: Listener>(
         .route("/inspect/balance", axum::routing::get(inspect_balance_get))
         .route("/inspect/assets", axum::routing::get(inspect_assets_get))
         .route("/inspect/audit", axum::routing::get(inspect_audit_get))
+
+        .route("/price/history", axum::routing::get(price_history_get))
 
         .with_state(std::sync::Arc::new(state))
 

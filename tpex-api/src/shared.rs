@@ -101,7 +101,7 @@ impl<'de> Deserialize<'de> for Token {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenInfo {
     pub token: Token,
@@ -109,45 +109,94 @@ pub struct TokenInfo {
     pub level: TokenLevel
 }
 
+#[derive(Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenPostArgs {
     pub level: TokenLevel,
     pub user: PlayerId
 }
 
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenDeleteArgs {
     pub token: Option<Token>
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StateGetArgs {
     pub from: Option<u64>
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StatePatchArgs {
     pub id: Option<u64>
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ErrorInfo {
     pub error: String
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct PollGetArgs {
     pub id: u64
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InspectBalanceGetArgs {
     pub player: PlayerId
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InspectAssetsGetArgs {
     pub player: PlayerId
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PriceChangeCause {
+    Buy,
+    Sell,
+    Cancel
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct PriceSummary {
+    pub time: chrono::DateTime<chrono::Utc>,
+    pub best_buy: Option<tpex::Coins>,
+    pub n_buy: u64,
+    pub best_sell: Option<tpex::Coins>,
+    pub n_sell: u64
+}
+impl PriceSummary {
+    pub const fn mid_market(&self) -> Option<tpex::Coins> {
+        match (self.best_buy, self.best_sell) {
+            (Some(best_buy), Some(best_sell)) => Some(tpex::Coins::from_millicoins(best_buy.millicoins().saturating_add(best_sell.millicoins()) / 2)),
+            (None, Some(x)) |
+            (Some(x), None) => Some(x),
+            (None, None) => None
+        }
+    }
+    #[allow(unused)]
+    pub fn cause(&self, prev: &PriceSummary) -> PriceChangeCause {
+        match (self.n_buy > prev.n_buy, self.n_sell > prev.n_sell) {
+            // There's no way for both to increase, so we were not given the previous order
+            (true, true) => panic!("Passed invalid previous value to tpex_api::PriceSummary::cause"),
+            // If neither have increased, it was a cancel
+            (false, false) => PriceChangeCause::Cancel,
+            (true , false) => PriceChangeCause::Buy,
+            (false, true ) => PriceChangeCause::Sell
+        }
+    }
+    #[allow(unused)]
+    // Only checks to see if the actual price change is the same, not the time it took place
+    pub fn same_prices_as(&self, other: &PriceSummary) -> bool {
+        self.best_buy == other.best_buy && self.n_buy == other.n_buy && self.best_sell == other.best_sell && self.n_sell == other.n_sell
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceHistoryArgs {
+    pub asset: tpex::AssetId,
 }
