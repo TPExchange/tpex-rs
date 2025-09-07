@@ -745,7 +745,7 @@ impl State {
                 Ok(())
             },
             Action::BuyOrder { player, asset, count, coins_per } => {
-                if count == 0 {
+                if count == 0 || coins_per.is_zero() {
                     return Err(Error::AlreadyDone)
                 }
                 // Check their money first

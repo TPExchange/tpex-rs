@@ -1530,10 +1530,20 @@ async fn test_zero_orders() {
     let asset = "cobblestone".to_owned();
     state.apply(Action::Deposit {
         player: player(1),
+        asset: DIAMOND_NAME.into(),
+        count: 100,
+        banker: PlayerId::the_bank()
+    }, sink()).await.expect("Unable to deposit diamonds");
+    state.apply(Action::Deposit {
+        player: player(1),
         asset: asset.clone(),
         count: 100,
         banker: PlayerId::the_bank()
     }, sink()).await.expect("Unable to deposit cobblestone");
+    state.apply(Action::BuyCoins {
+        player: player(1),
+        n_diamonds: 100
+    }, sink()).await.expect("Unable to buy coins");
     state.apply(Action::Deposit {
         player: player(1),
         asset: DIAMOND_NAME.into(),
@@ -1556,4 +1566,25 @@ async fn test_zero_orders() {
         count: 0,
         coins_per: Coins::from_coins(2)
     }, sink()).await.expect_err("Able to place zero sell order");
+}
+#[tokio::test]
+async fn test_zero_cost_buy() {
+    let mut state = State::new();
+    let asset = "cobblestone".to_owned();
+    state.apply(Action::Deposit {
+        player: player(1),
+        asset: DIAMOND_NAME.into(),
+        count: 100,
+        banker: PlayerId::the_bank()
+    }, sink()).await.expect("Unable to deposit diamonds");
+    state.apply(Action::BuyCoins {
+        player: player(1),
+        n_diamonds: 100
+    }, sink()).await.expect("Unable to buy coins");
+    state.apply(Action::BuyOrder {
+        player: player(1),
+        asset: asset.clone(),
+        count: 1,
+        coins_per: Coins::default()
+    }, sink()).await.expect_err("Able to put in buy order for zero coins");
 }

@@ -170,6 +170,7 @@ pub struct PriceSummary {
     pub n_sell: u64
 }
 impl PriceSummary {
+    #[allow(unused)]
     pub const fn mid_market(&self) -> Option<tpex::Coins> {
         match (self.best_buy, self.best_sell) {
             (Some(best_buy), Some(best_sell)) => Some(tpex::Coins::from_millicoins(best_buy.millicoins().saturating_add(best_sell.millicoins()) / 2)),
