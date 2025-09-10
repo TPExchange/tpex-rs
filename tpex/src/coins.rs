@@ -1,5 +1,4 @@
 use std::{fmt::Display, str::FromStr};
-use num_format::{Locale, ToFormattedString};
 
 use crate::{Error, Result};
 
@@ -55,7 +54,7 @@ impl Display for Coins {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let whole = self.milli / 1000;
         let frac = self.milli % 1000;
-        write!(f, "{}", whole.to_formatted_string(&Locale::en))?;
+        write!(f, "{whole}")?;
         if frac == 0 {
             write!(f, "c")
         }

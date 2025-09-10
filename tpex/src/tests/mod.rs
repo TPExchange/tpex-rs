@@ -39,8 +39,8 @@ async fn coin_fuzz() {
         ("100.000c", Coins::from_millicoins(100_000), "100c"),
         ("3.140", Coins::from_millicoins(3_140), "3.14c"),
         ("3.14c", Coins::from_millicoins(3_140), "3.14c"),
-        ("1000c", Coins::from_millicoins(1_000_000), "1,000c"),
-        ("1,321c", Coins::from_millicoins(1_321_000), "1,321c"),
+        ("1000c", Coins::from_millicoins(1_000_000), "1000c"),
+        ("1321c", Coins::from_millicoins(1_321_000), "1321c"),
     ];
     let bad = [
         ("100.0001c", Error::CoinStringTooPrecise),
