@@ -31,7 +31,7 @@ pub use etp::ETPId;
 /// This will reject a lot of valid IDs, so it should only be used for something that cannot be decomposed further
 /// (i.e. for parts of an SharedId, not for a PlayerId)
 pub fn is_safe_name(x: &str) -> bool {
-    x.chars().all(|i| i.is_ascii_alphanumeric() || i == '_' || i == '+' || i == '-')
+    x.chars().all(|i| i.is_ascii_alphanumeric() || i == '_' || i == '-')
 }
 
 pub const DIAMOND_NAME: &str = "diamond";
@@ -697,7 +697,7 @@ impl State {
                     // Check to see if they are allowed it
                     self.auth.check_withdrawal_authorized(&player, asset, *count)?;
                     // Check to make sure they're not trying to withdraw ETPs, because that makes no sense
-                    if asset.contains('%') {
+                    if ETPId::is_etp(asset) {
                         return Err(Error::UnauthorisedWithdrawal { asset: asset.clone(), amount_overdrawn: None })
                     }
                 }

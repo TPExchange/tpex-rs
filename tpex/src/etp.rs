@@ -11,7 +11,7 @@ pub struct ETPId {
 }
 
 impl ETPId {
-    /// Checks if an asset id is a etp id
+    /// Checks if an as\rset id is a etp id
     pub fn is_etp(id: &AssetId) -> bool {
         id.starts_with("/")
     }
@@ -55,14 +55,14 @@ impl FromStr for ETPId {
     type Err = crate::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (issuer, name) = s.split_once('%').ok_or(crate::Error::InvalidETPId)?;
+        let (issuer, name) = s.split_once(':').ok_or(crate::Error::InvalidETPId)?;
         let issuer = SharedId::from_str(issuer).map_err(|_| crate::Error::InvalidETPId)?;
         Self::try_new(issuer, name.into()).map_err(|_| crate::Error::InvalidETPId)
     }
 }
 impl Display for ETPId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}%{}", self.issuer, self.name)
+        write!(f, "{}:{}", self.issuer, self.name)
     }
 }
 impl Serialize for ETPId {
