@@ -52,6 +52,10 @@ name = "tpex-mirror"
 path = "src/mirror.rs"
 required-features = ["client"]
 
+[[bin]]
+name = "tpex-fastsync-cache"
+path = "src/cache.rs"
+required-features = ["client"]
 
 [lib]
 name = "tpex_api"
