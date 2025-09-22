@@ -58,10 +58,10 @@ impl Display for Coins {
         if frac == 0 {
             write!(f, "c")
         }
-        else if frac % 100 == 0 {
+        else if frac.is_multiple_of(100) {
             write!(f, ".{}c", frac/100)
         }
-        else if frac % 10 == 0 {
+        else if frac.is_multiple_of(10) {
             write!(f, ".{:02}c", frac/10)
         }
         else {

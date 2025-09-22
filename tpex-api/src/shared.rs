@@ -140,11 +140,6 @@ pub struct ErrorInfo {
 }
 #[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct PollGetArgs {
-    pub id: u64
-}
-#[derive(Default, Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
 pub struct InspectBalanceGetArgs {
     pub player: PlayerId
 }
