@@ -21,4 +21,4 @@ const_format = "^0.2.34"
 tokio = { version = "^1.45.0", features = ["test-util"] }
 
 [[bin]]
-name = "validator"
+name = "tpex-validator"

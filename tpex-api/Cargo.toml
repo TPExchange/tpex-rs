@@ -22,7 +22,7 @@ axum-extra = { version = "^0.10", features = ["typed-header", "query"], optional
 sqlx = { version = "^0.8.5", features = ["runtime-tokio", "sqlite"], optional = true }
 axum = { version = "^0.8.4", features = ["ws"], optional = true }
 getrandom = { version = "^0.3", optional = true }
-clap = { version = "^4.5.4", features = ["derive"], optional = true }
+clap = { version = "^4.5.4", features = ["derive", "env"], optional = true }
 tower-http = { version = "^0.6", features = ["cors", "trace"], optional = true}
 tracing-subscriber = { version = "^0.3", features=["env-filter"], optional = true }
 tracing = { version = "^0.1.41", optional = true }
@@ -40,7 +40,8 @@ tempfile = { version = "^3.0.0" }
 [features]
 server = ["dep:sqlx", "dep:axum-extra", "dep:axum", "dep:getrandom", "dep:clap", "dep:tower-http", "dep:tracing-subscriber", "dep:tracing", "dep:tokio-util"]
 client = ["dep:reqwest", "dep:reqwest-websocket", "dep:futures"]
-default = ["server", "client"]
+cli = ["client", "dep:clap"]
+default = ["server", "client", "cli"]
 
 [[bin]]
 name = "tpex-srv"
@@ -48,14 +49,9 @@ path = "src/bin.rs"
 required-features = ["server"]
 
 [[bin]]
-name = "tpex-mirror"
-path = "src/mirror.rs"
-required-features = ["client"]
-
-[[bin]]
-name = "tpex-fastsync-cache"
-path = "src/cache.rs"
-required-features = ["client"]
+name = "tpex-cli"
+path = "src/cli.rs"
+required-features = ["cli"]
 
 [lib]
 name = "tpex_api"
