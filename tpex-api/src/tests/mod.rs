@@ -180,13 +180,11 @@ async fn mirrored_stream_state() {
             banker: PlayerId::the_bank()
         },
     ];
-    let actions_copy = actions.clone();
-    let client_2_clone = client_2.clone();
-    tokio::spawn(async move {
-        for i in actions_copy {
-            client_2_clone.apply(i).await.expect("Failed to apply action");
-        }
-    });
+    for i in actions.clone() {
+        let n = client_2.apply(i).await.expect("Failed to apply action");
+        println!("Applied action id {n}");
+    }
+
     let mut stream = std::pin::pin!(stream);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.1.action, actions[0]);
@@ -196,7 +194,7 @@ async fn mirrored_stream_state() {
     assert_eq!(wrapped.1.action, actions[2]);
     let wrapped = stream.next().await.expect("Stream terminated early").expect("Failed to read from stream");
     assert_eq!(wrapped.1.action, actions[3]);
-    assert_eq!(tpex::StateSync::from(&*client_2.fastsync().await.unwrap()), tpex::StateSync::from(&*client_clone.fastsync().await.unwrap()))
+    assert_eq!(tpex::StateSync::from(&*client_2.fastsync().await.unwrap()), tpex::StateSync::from(&*client_clone.fastsync().await.unwrap()));
 }
 
 #[tokio::test]

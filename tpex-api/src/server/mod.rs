@@ -164,7 +164,7 @@ async fn state_get(
     else {
         let data =
             state.tpex.read().await.cache().iter()
-            .skip(from as usize)
+            .skip((from as usize).saturating_sub(1))
             .fold(String::new(), |a, b| a + b);
         let body = axum::body::Body::from(data);
         axum::response::Response::builder()

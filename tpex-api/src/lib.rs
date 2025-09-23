@@ -211,7 +211,7 @@ impl Mirrored {
     }
     pub async fn sync(&'_ self) -> Result<tokio::sync::RwLockReadGuard<'_, State>> {
         let mut state = self.state.write().await;
-        let cursor = std::io::Cursor::new(self.remote.get_state(state.get_next_id() - 1).await?);
+        let cursor = std::io::Cursor::new(self.remote.get_state(state.get_next_id()).await?);
         let mut buf = tokio::io::BufReader::new(cursor);
         state.replay(&mut buf, true).await.expect("State unable to replay");
         Ok(state.downgrade())
