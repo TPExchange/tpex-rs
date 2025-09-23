@@ -234,7 +234,7 @@ impl Mirrored {
             if state.get_next_id() != wrapped_action.id {
                 return Err(tpex::Error::InvalidId { id: wrapped_action.id }.into());
             }
-            state.apply(wrapped_action.action.clone(), tokio::io::sink()).await?;
+            state.apply_wrapped(wrapped_action.clone(), tokio::io::sink()).await?;
             drop(state);
             Ok((this, wrapped_action))
         }}))

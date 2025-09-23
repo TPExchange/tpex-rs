@@ -985,6 +985,13 @@ impl State {
     pub fn apply(&mut self, action: Action, out: impl tokio::io::AsyncWrite) -> impl Future<Output=Result<u64>> {
         self.apply_with_time(action, chrono::Utc::now(), out)
     }
+    /// Atomically try to apply an action, and if successful, write to given stream
+    pub async fn apply_wrapped(&mut self, wrapped_action: WrappedAction, out: impl tokio::io::AsyncWrite) -> Result<u64> {
+        if wrapped_action.id != self.next_id {
+            return Err(Error::InvalidId { id: wrapped_action.id })
+        }
+        self.apply_with_time(wrapped_action.action, wrapped_action.time, out).await
+    }
 }
 impl Auditable for State {
     fn soft_audit(&self) -> Audit {
