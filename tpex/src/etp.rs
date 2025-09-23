@@ -2,7 +2,9 @@ use std::{fmt::Display, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{is_safe_name, AssetId, SharedId};
+use crate::{is_safe_name, AssetId, SharedId, SHARED_ACCOUNT_DELIM};
+
+pub const ETP_DELIM : char = '.';
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ETPId {
@@ -13,7 +15,7 @@ pub struct ETPId {
 impl ETPId {
     /// Checks if an as\rset id is a etp id
     pub fn is_etp(id: &AssetId) -> bool {
-        id.starts_with("/")
+        id.starts_with(SHARED_ACCOUNT_DELIM)
     }
 
     /// Creates an ETPId from the given parameters, ensuring that the name is valid
@@ -55,7 +57,7 @@ impl FromStr for ETPId {
     type Err = crate::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (issuer, name) = s.split_once(':').ok_or(crate::Error::InvalidETPId)?;
+        let (issuer, name) = s.split_once(ETP_DELIM).ok_or(crate::Error::InvalidETPId)?;
         let issuer = SharedId::from_str(issuer).map_err(|_| crate::Error::InvalidETPId)?;
         Self::try_new(issuer, name.into()).map_err(|_| crate::Error::InvalidETPId)
     }

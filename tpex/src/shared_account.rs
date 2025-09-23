@@ -3,10 +3,13 @@ use std::fmt::Display;
 use std::ops::{Div, DivAssign};
 use std::str::FromStr;
 
+use const_format::concatcp;
 use serde::{Deserialize, Serialize};
 use serde::de::Error;
 
 use crate::{is_safe_name, Action, PlayerId};
+
+pub const SHARED_ACCOUNT_DELIM: char = '.';
 
 /// The checked name of a shared acount, with path syntax
 ///
@@ -28,26 +31,26 @@ impl SharedId {
         }
         else {
             // Skip the leading slash and split
-            Some(self.0.0[1..].split('/')).into_iter().flatten()
+            Some(self.0.0[1..].split(SHARED_ACCOUNT_DELIM)).into_iter().flatten()
         }
     }
     pub fn take_name(&self) -> Option<(impl DoubleEndedIterator<Item = &str>, &str)> {
         if self.is_bank() {
             return None
         }
-        let last_delim_pos = self.0.0.rfind('/').unwrap();
+        let last_delim_pos = self.0.0.rfind(SHARED_ACCOUNT_DELIM).unwrap();
         if last_delim_pos == 0 {
             Some((None.into_iter().flatten(), &self.0.0[last_delim_pos+1..]))
         }
         else {
-            Some((Some(self.0.0[1..last_delim_pos].split('/')).into_iter().flatten(), &self.0.0[last_delim_pos+1..]))
+            Some((Some(self.0.0[1..last_delim_pos].split(SHARED_ACCOUNT_DELIM)).into_iter().flatten(), &self.0.0[last_delim_pos+1..]))
         }
     }
     pub fn parent(&self) -> Option<SharedId> {
         if self.is_bank() {
             return None;
         }
-        let last_delim_pos = self.0.0.rfind('/').unwrap();
+        let last_delim_pos = self.0.0.rfind(SHARED_ACCOUNT_DELIM).unwrap();
         if last_delim_pos == 0 {
             Some(SharedId::the_bank())
         }
@@ -56,12 +59,12 @@ impl SharedId {
         }
     }
     pub fn try_concat(mut self, name: &str) -> Result<Self, Self> {
-        if name.contains('/') {
+        if name.contains(SHARED_ACCOUNT_DELIM) {
             Err(self)
         }
         else {
             self.0.0.reserve(name.len() + 1);
-            self.0.0.push('/');
+            self.0.0.push(SHARED_ACCOUNT_DELIM);
             self.0.0.push_str(name);
             Ok(self)
         }
@@ -75,11 +78,10 @@ impl SharedId {
         if !self.0.0.starts_with(&other.0.0) {
             return false;
         }
+        // Check that the string is either the same, or that the prefix is terminated by a slash
         match self.0.0.as_bytes().get(other.0.0.len()) {
-            // If we are equal to other, then we are done
-            None |
-            // Otherwise, check to make sure that it's not just something that begins with the same string
-            Some(b'/') => true,
+            None => true,
+            Some(val) if *val == SHARED_ACCOUNT_DELIM as u8 => true,
             _ => false
         }
     }
@@ -104,10 +106,10 @@ impl TryFrom<PlayerId> for SharedId {
 
     fn try_from(value: PlayerId) -> Result<Self, Self::Error> {
         // It's the bank!
-        if value.get_raw_name() == "/" {
+        if value.0 == concatcp!(SHARED_ACCOUNT_DELIM) {
             return Ok(SharedId(value));
         }
-        if !value.0.starts_with('/') || value.0.ends_with('/') || value.0.contains("//") {
+        if !value.0.starts_with(SHARED_ACCOUNT_DELIM) || value.0.ends_with(SHARED_ACCOUNT_DELIM) || value.0 == concatcp!(SHARED_ACCOUNT_DELIM, SHARED_ACCOUNT_DELIM) {
             return Err(value);
         }
         let ret = Self(value);

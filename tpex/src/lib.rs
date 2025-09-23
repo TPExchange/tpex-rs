@@ -1,5 +1,6 @@
 use std::{collections::HashSet, ops::{Add, AddAssign}, pin::pin};
 
+use const_format::concatcp;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 // We use a base coins, which represent 1/1000 of a diamond
@@ -26,6 +27,9 @@ pub use coins::Coins;
 pub use shared_account::SharedId;
 pub use etp::ETPId;
 
+pub use shared_account::SHARED_ACCOUNT_DELIM;
+pub use etp::ETP_DELIM;
+
 /// Checks whether `x` is a safe name (i.e. free from annoying bs that could hack us)
 ///
 /// This will reject a lot of valid IDs, so it should only be used for something that cannot be decomposed further
@@ -51,9 +55,9 @@ impl PlayerId {
     pub fn assume_username_correct(s: String) -> PlayerId { PlayerId(s) }
     /// Gets the internal name of the user
     pub fn get_raw_name(&self) -> &String { &self.0 }
-    pub fn the_bank() -> PlayerId { PlayerId("/".to_owned()) }
-    pub fn is_bank(&self) -> bool { self.0 == "/" }
-    pub fn is_unshared(&self) -> bool { !self.0.starts_with('/') }
+    pub fn the_bank() -> PlayerId { PlayerId(SHARED_ACCOUNT_DELIM.to_string()) }
+    pub fn is_bank(&self) -> bool { self.0 == concatcp!(SHARED_ACCOUNT_DELIM) }
+    pub fn is_unshared(&self) -> bool { !self.0.starts_with(SHARED_ACCOUNT_DELIM) }
 }
 impl<'de> Deserialize<'de> for PlayerId {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>

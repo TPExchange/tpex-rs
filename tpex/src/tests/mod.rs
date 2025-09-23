@@ -931,24 +931,23 @@ fn fuzz_shared_id() {
     assert_eq!(SharedId::the_bank().parts().collect::<Vec<&str>>(), Vec::<&str>::new(), "Bank had parts");
 
     SharedId::try_from(PlayerId::assume_username_correct("foo".to_owned())).expect_err("Invalid SharedId got through");
-    SharedId::try_from(PlayerId::assume_username_correct("foo/".to_owned())).expect_err("Invalid SharedId got through");
-    SharedId::try_from(PlayerId::assume_username_correct("/foo/".to_owned())).expect_err("Invalid SharedId got through");
+    SharedId::try_from(PlayerId::assume_username_correct("foo.".to_owned())).expect_err("Invalid SharedId got through");
+    SharedId::try_from(PlayerId::assume_username_correct(".foo.".to_owned())).expect_err("Invalid SharedId got through");
 
-    let single = SharedId::try_from(PlayerId::assume_username_correct("/foo".to_owned())).expect("Could not parse valid SharedId");
+    let single = SharedId::try_from(PlayerId::assume_username_correct(".foo".to_owned())).expect("Could not parse valid SharedId");
     let (parent, name) = single.take_name().expect("Single name didn't have a name");
     assert_eq!(parent.collect::<Vec<&str>>(), Vec::<&str>::new(), "Somehow had parent in single name");
     assert_eq!(name, "foo");
     assert_eq!(single.parent(), Some(SharedId::the_bank()));
-    let multi = SharedId::try_from(PlayerId::assume_username_correct("/foo/bar".to_owned())).expect("Could not parse valid SharedId");
+    let multi = SharedId::try_from(PlayerId::assume_username_correct(".foo.bar".to_owned())).expect("Could not parse valid SharedId");
     let (parent, name) = multi.take_name().expect("Multi name didn't have a name");
     assert_eq!(parent.collect::<Vec<_>>(), vec!["foo"]);
     assert_eq!(name, "bar");
-
 }
 
 #[tokio::test]
 async fn test_shared() {
-    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
+    let shared_name: SharedId = ".foo".parse().expect("Could not parse name");
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
@@ -967,7 +966,7 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await;
-    let shared_name2: SharedId = "/foo2".parse().expect("Could not parse name");
+    let shared_name2: SharedId = ".foo2".parse().expect("Could not parse name");
     // Try with invalid consensus
     state.assert_state(
         Action::CreateOrUpdateShared {
@@ -1251,12 +1250,12 @@ async fn test_shared() {
         Action::Propose {
             proposer: player(1),
             action: Box::new(Action::CreateOrUpdateShared {
-                name: "/bar".parse().unwrap(),
+                name: ".bar".parse().unwrap(),
                 owners: vec![player(3)],
                 min_difference: 1,
                 min_votes: 1
             }),
-            target: "/foo".parse().unwrap()
+            target: ".foo".parse().unwrap()
         },
         ExpectedState {
             should_fail: true,
@@ -1264,7 +1263,7 @@ async fn test_shared() {
         }
     ).await;
     // They do it properly this time
-    let child_name: SharedId = "/foo/bar".parse().unwrap();
+    let child_name: SharedId = ".foo.bar".parse().unwrap();
     let proposal4 = state.assert_state(
         Action::Propose {
             proposer: player(1),
@@ -1274,7 +1273,7 @@ async fn test_shared() {
                 min_difference: 1,
                 min_votes: 1
             }),
-            target: "/foo".parse().unwrap()
+            target: ".foo".parse().unwrap()
         },
         ExpectedState {
             ..Default::default()
@@ -1360,7 +1359,7 @@ async fn test_shared() {
 }
 #[test]
 fn fuzz_etp() {
-    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
+    let shared_name: SharedId = ".foo".parse().expect("Could not parse name");
     assert!(ETPId::try_new(shared_name.clone(), "foobar".to_owned()).is_ok());
     assert!(ETPId::try_new(shared_name.clone(), ":foobar".to_owned()).is_err());
     assert!(ETPId::try_new(shared_name.clone(), "f:oobar".to_owned()).is_err());
@@ -1368,7 +1367,7 @@ fn fuzz_etp() {
 
 #[tokio::test]
 async fn issue_etp() {
-    let shared_name: SharedId = "/foo".parse().expect("Could not parse name");
+    let shared_name: SharedId = ".foo".parse().expect("Could not parse name");
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
