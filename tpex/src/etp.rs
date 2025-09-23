@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{is_safe_name, AssetId, SharedId, SHARED_ACCOUNT_DELIM};
 
-pub const ETP_DELIM : char = '.';
+pub const ETP_DELIM : char = ':';
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ETPId {

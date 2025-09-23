@@ -1360,9 +1360,11 @@ async fn test_shared() {
 #[test]
 fn fuzz_etp() {
     let shared_name: SharedId = ".foo".parse().expect("Could not parse name");
-    assert!(ETPId::try_new(shared_name.clone(), "foobar".to_owned()).is_ok());
     assert!(ETPId::try_new(shared_name.clone(), ":foobar".to_owned()).is_err());
     assert!(ETPId::try_new(shared_name.clone(), "f:oobar".to_owned()).is_err());
+    assert_eq!(AssetId::from(&ETPId::try_new(shared_name.clone(), "foobar".to_owned()).unwrap()), AssetId::from(".foo:foobar"));
+    assert_eq!(AssetId::from(&ETPId::try_new(SharedId::the_bank(), "foobar".to_owned()).unwrap()), AssetId::from(".:foobar"));
+    assert_eq!(ETPId::try_from(AssetId::from(".:foobar")).unwrap(), ETPId::try_new(SharedId::the_bank(), "foobar".to_owned()).unwrap());
 }
 
 #[tokio::test]
