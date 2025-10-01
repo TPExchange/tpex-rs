@@ -85,7 +85,7 @@ async fn deposit() {
     };
     client.apply(&deposit_action).await.expect("Failed to apply deposit");
     // This will be a single action, so we can treat it as a single wrapped action
-    let new_state: WrappedAction = serde_json::from_slice(&client.get_state(0).await.expect("FastSync failed")).expect("Failed to deserialise state");
+    let new_state: WrappedAction = serde_json::from_str(&client.get_state(0).await.expect("FastSync failed")).expect("Failed to deserialise state");
     assert_eq!(new_state.action, deposit_action);
     assert_eq!(new_state.id, 1);
 }

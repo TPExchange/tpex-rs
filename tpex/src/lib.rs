@@ -581,6 +581,10 @@ impl State {
     pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> { self.balance.get_assets(player) }
     /// Get all players' assets
     pub fn get_all_assets(&self) -> &std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>> { self.balance.get_all_assets() }
+    /// Bundle together a player's assets and balances into an audit
+    pub fn audit_player(&self, player: &PlayerId) -> Audit {
+        Audit { coins: self.get_bal(player), assets: self.get_assets(player) }
+    }
     /// List all withdrawals
     pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawal> { self.withdrawal.get_withdrawals() }
     /// List all withdrawals

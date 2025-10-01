@@ -77,12 +77,12 @@ impl Remote {
         }
     }
 
-    pub async fn get_state(&self, from: u64) -> Result<Vec<u8>> {
+    pub async fn get_state(&self, from: u64) -> Result<String> {
         let mut target = self.endpoint.clone();
         target.query_pairs_mut().append_pair("from", &from.to_string());
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
 
-        Ok(Self::check_response(self.client.get(target).send().await?).await?.bytes().await?.to_vec())
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.text().await?)
     }
     pub async fn stream_state(&self, from: u64) -> Result<impl futures::Stream<Item=Result<tpex::WrappedAction>> + use<>> {
         let mut target = self.endpoint.clone();
@@ -119,7 +119,7 @@ impl Remote {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
-        Ok(Self::check_response(self.client.post(target).send().await?).await?.json().await?)
+        Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
     pub async fn create_token(&self, args: &TokenPostArgs) -> Result<Token> {
         let mut target = self.endpoint.clone();
