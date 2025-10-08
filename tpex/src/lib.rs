@@ -1,7 +1,21 @@
-use std::{collections::HashSet, ops::{Add, AddAssign}, pin::pin};
+use std::{ops::{Add, AddAssign}, pin::pin};
 
-use const_format::concatcp;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+pub mod coins;
+pub use coins::Coins;
+
+pub mod consts;
+pub use consts::*;
+
+pub mod ids;
+pub use ids::{AccountId, AssetId, ETPId, SharedId, UnsharedId};
+pub mod balance;
+pub mod order;
+pub mod withdrawal;
+pub mod auth;
+pub mod shared_account;
+mod tests;
 
 // We use a base coins, which represent 1/1000 of a diamond
 use serde::{Deserialize, Serialize};
@@ -10,76 +24,11 @@ use auth::AuthSync;
 use balance::BalanceSync;
 use order::OrderSync;
 use withdrawal::WithdrawalSync;
-use crate::shared_account::SharedSync;
+use shared_account::SharedSync;
+
+use crate::ids::HashMapCowExt;
 
 use self::{order::PendingOrder, withdrawal::PendingWithdrawal};
-
-pub mod balance;
-pub mod order;
-pub mod withdrawal;
-pub mod coins;
-pub mod auth;
-pub mod shared_account;
-pub mod etp;
-mod tests;
-
-pub use coins::Coins;
-pub use shared_account::SharedId;
-pub use etp::ETPId;
-
-pub use shared_account::SHARED_ACCOUNT_DELIM;
-pub use etp::ETP_DELIM;
-
-/// Checks whether `x` is a safe name (i.e. free from annoying bs that could hack us)
-///
-/// This will reject a lot of valid IDs, so it should only be used for something that cannot be decomposed further
-/// (i.e. for parts of an SharedId, not for a PlayerId)
-pub fn is_safe_name(x: &str) -> bool {
-    x.chars().all(|i| i.is_ascii_alphanumeric() || i == '_' || i == '-')
-}
-
-pub const DIAMOND_NAME: &str = "diamond";
-pub const DIAMOND_RAW_COINS: Coins = Coins::from_coins(1000);
-
-const INITIAL_BANK_RATES: BankRates = BankRates {
-    buy_order_ppm:      0_0000,
-    sell_order_ppm:     0_0000,
-    coins_sell_ppm:    5_0000,
-    coins_buy_ppm:   5_0000,
-};
-
-#[derive(PartialEq, PartialOrd, Eq, Ord, Default, Debug, Clone, Hash)]
-pub struct PlayerId(String);
-impl PlayerId {
-    /// Creates a player id, assuming that the given id is valid, correct, and authorized.
-    pub fn assume_username_correct(s: String) -> PlayerId { PlayerId(s) }
-    /// Gets the internal name of the user
-    pub fn get_raw_name(&self) -> &String { &self.0 }
-    pub fn the_bank() -> PlayerId { PlayerId(SHARED_ACCOUNT_DELIM.to_string()) }
-    pub fn is_bank(&self) -> bool { self.0 == concatcp!(SHARED_ACCOUNT_DELIM) }
-    pub fn is_unshared(&self) -> bool { !self.0.starts_with(SHARED_ACCOUNT_DELIM) }
-}
-impl<'de> Deserialize<'de> for PlayerId {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de> {
-        String::deserialize(deserializer).map(PlayerId)
-    }
-}
-impl Serialize for PlayerId {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer {
-        String::serialize(&self.0, serializer)
-    }
-}
-impl core::fmt::Display for PlayerId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-pub type AssetId = String;
 
 #[derive(PartialEq, Eq, Debug, PartialOrd, Ord)]
 pub enum ActionLevel {
@@ -87,74 +36,74 @@ pub enum ActionLevel {
     Banker
 }
 #[derive(PartialEq, Eq, Debug)]
-pub struct ActionPermissions {
+pub struct ActionPermissions<'a> {
     pub level: ActionLevel,
-    pub player: PlayerId
+    pub player: AccountId<'a>
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub enum Action {
+pub enum Action<'a> {
     /// Deleted transaction, for when someone does a bad
     Deleted {
         /// The reason it was deleted
         reason: String,
         /// Who deleted it
-        banker: PlayerId
+        banker: AccountId<'a>
     },
     /// Player deposited assets
     Deposit {
         /// The player who should be credited with these assets
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The asset to deposit
-        asset: AssetId,
+        asset: AssetId<'a>,
         /// The number of that asset to deposit
         count: u64,
         /// The banker who performed the deposit
-        banker: PlayerId,
+        banker: AccountId<'a>,
     },
     /// Used to correct typos
     Undeposit {
         /// The player who should have the items taken away
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The asset to remove
-        asset: AssetId,
+        asset: AssetId<'a>,
         /// The amount of those items to be removed
         count: u64,
         /// The banker who submitted this action
-        banker: PlayerId
+        banker: AccountId<'a>
     },
     /// Player asked to withdraw assets
     RequestWithdrawal {
         /// The player who requested the withdrawal
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The assets to withdraw
-        assets: std::collections::HashMap<AssetId,u64>
+        assets: hashbrown::HashMap<AssetId<'static>,u64>
     },
     /// A banker has agreed to take out assets imminently
     CompleteWithdrawal {
         /// The ID of the corresponding RequestWithdrawal transaction
         target: u64,
         /// The banker who confirmed it
-        banker: PlayerId,
+        banker: AccountId<'a>,
     },
     /// A banker has confirmed that these assets have not, and will not, be withdrawn
     CancelWithdrawal {
         /// The ID of the corresponding RequestWithdrawal transaction
         target: u64,
         /// The banker who confirmed it
-        banker: PlayerId,
+        banker: AccountId<'a>,
     },
     /// The player got coins for giving diamonds
     BuyCoins {
         /// The player who should be credited with the coins
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The number of diamonds converted
         n_diamonds: u64,
     },
     /// The player got diamonds for giving coins
     SellCoins {
         /// The player who should be credited with the diamonds
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The number of diamonds converted
         n_diamonds: u64,
     },
@@ -163,9 +112,9 @@ pub enum Action {
     /// Instant matches should favour the buyer
     BuyOrder {
         /// The player who placed the order
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The asset they wish to order
-        asset: AssetId,
+        asset: AssetId<'a>,
         /// The number of that asset they wish to order
         count: u64,
         /// The number of coins each individual asset will cost
@@ -176,9 +125,9 @@ pub enum Action {
     /// Instant matches should favour the seller
     SellOrder {
         /// The player who placed the order
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The asset they wish to order
-        asset: AssetId,
+        asset: AssetId<'a>,
         /// The number of that asset they wish to order
         count: u64,
         /// The number of coins each individual asset will cost
@@ -187,16 +136,16 @@ pub enum Action {
     /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
         /// The new list of assets that are restricted
-        restricted_assets: HashSet<AssetId>,
+        restricted_assets: hashbrown::HashSet<AssetId<'static>>,
     },
     /// Allows a player to place new withdrawal requests up to new_count of an item
     ///
     /// XXX: This can and will nuke existing values, so check those race conditions!
     AuthoriseRestricted {
         /// The player whose authorisation is being adjusted
-        authorisee: PlayerId,
+        authorisee: AccountId<'a>,
         /// The asset that should be authorised
-        asset: AssetId,
+        asset: AssetId<'a>,
         /// The new maximum amount this player can withdraw
         new_count: u64
     },
@@ -208,20 +157,20 @@ pub enum Action {
     /// A transfer of coins from one player to another, no strings attached
     TransferCoins {
         /// The player sending the coins
-        payer: PlayerId,
+        payer: AccountId<'a>,
         /// The player receiving the coins
-        payee: PlayerId,
+        payee: AccountId<'a>,
         /// The number of coins
         count: Coins
     },
     /// A transfer of items from one player to another, no strings attached
     TransferAsset {
         /// The player sending the asset
-        payer: PlayerId,
+        payer: AccountId<'a>,
         /// The player receiving the asset
-        payee: PlayerId,
+        payee: AccountId<'a>,
         /// The name of the asset
-        asset: AssetId,
+        asset: AssetId<'a>,
         /// The amount of the asset
         count: u64
     },
@@ -237,9 +186,9 @@ pub enum Action {
         /// i.e. If /foo creates an account bar, then it will be called /foo/bar
         ///
         /// Note that the bank name "/" is implicit here
-        name: SharedId,
+        name: SharedId<'a>,
         /// The players who control this account
-        owners: Vec<PlayerId>,
+        owners: Vec<AccountId<'static>>,
         /// The minimum value of (agree - disagree) before a vote passes
         min_difference: u64,
         /// The minimum number of owners who need to vote in order for a proposal to be considered
@@ -248,42 +197,42 @@ pub enum Action {
     /// Proposes an action for a shared account
     Propose {
         /// The actual action to perform
-        action: Box<Action>,
+        action: Box<Action<'static>>,
         /// The player proposing the action
-        proposer: PlayerId,
+        proposer: AccountId<'a>,
         /// The shared account that this proposal applies to
-        target: SharedId
+        target: SharedId<'a>
     },
     /// Agree to a proposal
     Agree {
         /// The player who agrees
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The ID of the proposal in question
         proposal_id: u64,
     },
     /// Disagree to a proposal
     Disagree {
         /// The player who disagrees
-        player: PlayerId,
+        player: AccountId<'a>,
         /// The ID of the proposal in question
         proposal_id: u64,
     },
     /// Shut down a shared account, cancel all orders, and credit the remaining assets and coins to the parent
     WindUp {
         /// The shared account to wind up
-        account: SharedId,
+        account: SharedId<'a>,
     },
     /// Update the list of shared accounts that are allowed to issue exchange traded products
     ///
     /// The compliance process should be very tight to ensure low default risk
     UpdateETPAuthorised {
         /// The new list of shared accounts
-        accounts: HashSet<SharedId>
+        accounts: hashbrown::HashSet<SharedId<'static>>
     },
     /// Issue an exchange traded product to the issuing account
     Issue {
         /// The product to be issued
-        product: ETPId,
+        product: ETPId<'a>,
         /// The amount of that product, capped to a u32 to make it harder (and more obvious) if someone is doing a funny
         count: u32
     },
@@ -292,12 +241,12 @@ pub enum Action {
     /// This allows redemption by sending the asset to the issuer, who then removes
     Remove {
         /// The product to be removed
-        product: ETPId,
+        product: ETPId<'a>,
         /// The amount of that product
         count: u64
     }
 }
-impl Action {
+impl<'a> Action<'a> {
     fn adjust_audit(&self, mut audit: Audit) -> Option<Audit> {
         match self {
             Action::Deposit { asset, count, .. } => {
@@ -315,12 +264,12 @@ impl Action {
                 None
             },
             Action::BuyCoins { n_diamonds, .. } => {
-                audit.sub_asset(DIAMOND_NAME.into(), *n_diamonds);
+                audit.sub_asset(AssetId::DIAMOND, *n_diamonds);
                 audit.add_coins(DIAMOND_RAW_COINS.checked_mul(*n_diamonds).unwrap());
                 Some(audit)
             },
             Action::SellCoins { n_diamonds, .. } => {
-                audit.add_asset(DIAMOND_NAME.into(), *n_diamonds);
+                audit.add_asset(AssetId::DIAMOND, *n_diamonds);
                 audit.sub_coins(DIAMOND_RAW_COINS.checked_mul(*n_diamonds).unwrap());
                 Some(audit)
             },
@@ -349,23 +298,23 @@ impl Action {
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Audit {
     pub coins: Coins,
-    pub assets: std::collections::HashMap<AssetId, u64>
+    pub assets: hashbrown::HashMap<AssetId<'static>, u64>
 }
 impl Audit {
     pub fn add_asset(&mut self, asset: AssetId, count: u64) {
         if count > 0 {
-            let entry = self.assets.entry(asset).or_default();
-            *entry = entry.checked_add(count).expect("Failed to add asset to audit")
+            let entry = self.assets.cow_get_or_default(asset).1;
+            *entry = entry.checked_add(count).expect("Failed to add asset to audit");
         }
     }
     pub fn sub_asset(&mut self, asset: AssetId, count: u64) {
         if count == 0 {
             return;
         }
-        let std::collections::hash_map::Entry::Occupied(mut entry) = self.assets.entry(asset)
+        let hashbrown::hash_map::RawEntryMut::Occupied(mut entry) = self.assets.raw_entry_mut().from_key(asset.as_ref())
         else { panic!("Tried to remove empty asset from audit") };
         match entry.get().checked_sub(count) {
-            Some(0) => {entry.remove();  },
+            Some(0) => { entry.remove(); },
             None => panic!("Failed to remove asset from audit"),
             Some(res) => { *entry.get_mut() = res; }
         }
@@ -378,7 +327,7 @@ impl Audit {
     }
 }
 impl Add for Audit {
-    type Output = Audit;
+    type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
         let mut ret = self;
@@ -407,26 +356,26 @@ pub trait Auditable {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct WrappedAction {
+pub struct WrappedAction<'a> {
     // The id of the action, which should equal the line number of the trades list
     pub id: u64,
     // The time this action was performed
     pub time: chrono::DateTime<chrono::Utc>,
     // The action itself
-    pub action: Action,
+    pub action: Action<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     OverdrawnAsset {
-        asset: AssetId,
+        asset: AssetId<'static>,
         amount_overdrawn: u64
     },
     OverdrawnCoins {
         amount_overdrawn: Coins
     },
     UnauthorisedWithdrawal{
-        asset: AssetId,
+        asset: AssetId<'static>,
         // Set to be None if the player has no authorization at all to withdraw this
         amount_overdrawn: Option<u64>
     },
@@ -434,7 +383,7 @@ pub enum Error {
     Overflow,
     InvalidId{id: u64},
     AlreadyDone,
-    NotABanker{player: PlayerId},
+    NotABanker{player: AccountId<'static>},
     CoinStringMangled,
     CoinStringTooPrecise,
     InvalidRates,
@@ -444,7 +393,7 @@ pub enum Error {
     InvalidETPId,
     UnauthorisedShared,
     UnsharedOnly,
-    UnauthorisedIssue{account: SharedId},
+    UnauthorisedIssue{account: SharedId<'static>},
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -574,23 +523,23 @@ impl State {
     /// Get the next line
     pub fn get_next_id(&self) -> u64 { self.next_id }
     /// Get a player's balance
-    pub fn get_bal(&self, player: &PlayerId) -> Coins { self.balance.get_bal(player) }
+    pub fn get_bal(&self, player: &AccountId) -> Coins { self.balance.get_bal(player) }
     /// Get all balances
-    pub fn get_bals(&self) -> std::collections::HashMap<PlayerId, Coins> { self.balance.get_bals() }
+    pub fn get_bals(&self) -> hashbrown::HashMap<AccountId<'static>, Coins> { self.balance.get_bals() }
     /// Get a player's assets
-    pub fn get_assets(&self, player: &PlayerId) -> std::collections::HashMap<AssetId, u64> { self.balance.get_assets(player) }
+    pub fn get_assets(&self, player: &AccountId) -> hashbrown::HashMap<AssetId<'static>, u64> { self.balance.get_assets(player) }
     /// Get all players' assets
-    pub fn get_all_assets(&self) -> &std::collections::HashMap<PlayerId, std::collections::HashMap<AssetId, u64>> { self.balance.get_all_assets() }
+    pub fn get_all_assets(&'_ self) -> &'_ hashbrown::HashMap<AccountId<'_>, hashbrown::HashMap<AssetId<'_>, u64>> { self.balance.get_all_assets() }
     /// Bundle together a player's assets and balances into an audit
-    pub fn audit_player(&self, player: &PlayerId) -> Audit {
+    pub fn audit_player(&self, player: &AccountId) -> Audit {
         Audit { coins: self.get_bal(player), assets: self.get_assets(player) }
     }
     /// List all withdrawals
     pub fn get_withdrawals(&self) -> std::collections::BTreeMap<u64, PendingWithdrawal> { self.withdrawal.get_withdrawals() }
     /// List all withdrawals
-    pub fn get_withdrawal(&self, id: u64) -> Result<PendingWithdrawal> { self.withdrawal.get_withdrawal(id) }
+    pub fn get_withdrawal(&self, id: u64) -> Result<&PendingWithdrawal> { self.withdrawal.get_withdrawal(id) }
     /// Get the withdrawal the bankers should examine next
-    pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawal> { self.withdrawal.get_next_withdrawal() }
+    pub fn get_next_withdrawal(&self) -> Option<&PendingWithdrawal> { self.withdrawal.get_next_withdrawal() }
     /// List all orders
     pub fn get_orders(&self) -> std::collections::BTreeMap<u64, PendingOrder> { self.order.get_all() }
     /// List all orders
@@ -602,19 +551,19 @@ impl State {
     /// Returns true if the given item is currently restricted
     pub fn is_restricted(&self, asset: &AssetId) -> bool { self.auth.is_restricted(asset) }
     /// Lists all restricted items
-    pub fn get_restricted(&self) -> impl IntoIterator<Item = &AssetId> { self.auth.get_restricted() }
+    pub fn get_restricted(&self) -> impl IntoIterator<Item = &AssetId<'_>> { self.auth.get_restricted() }
     /// Gets a list of all bankers
-    pub fn get_bankers(&self) -> &HashSet<PlayerId> { self.shared_account.the_bank().owners() }
+    pub fn get_bankers(&self) -> &hashbrown::HashSet<AccountId<'_>> { self.shared_account.the_bank().owners() }
     /// Returns true if the given player is an banker
-    pub fn is_banker(&self, player: &PlayerId) -> bool { player.is_bank() || self.shared_account.the_bank().owners().contains(player) }
+    pub fn is_banker(&self, player: &AccountId) -> bool { player.is_bank() || self.shared_account.the_bank().owners().contains(player) }
     /// Get the required permissions for a given action
-    pub fn perms(&self, action: &Action) -> Result<ActionPermissions> {
+    pub fn perms<'a>(&'a self, action: &'a Action) -> Result<ActionPermissions<'a>> {
         match action {
             Action::AuthoriseRestricted { .. } |
             Action::UpdateBankRates { .. } |
             Action::UpdateRestricted { .. } |
             Action::UpdateETPAuthorised { .. }
-                => Ok(ActionPermissions { level: ActionLevel::Banker, player: PlayerId::the_bank() }),
+                => Ok(ActionPermissions { level: ActionLevel::Banker, player: AccountId::THE_BANK }),
 
             Action::Deleted { banker, .. } |
             Action::Deposit { banker, .. } |
@@ -640,9 +589,9 @@ impl State {
             Action::Propose { proposer, action, .. } => {
                 let perms = self.perms(action)?;
                 if perms.level != ActionLevel::Normal {
-                    return Err(Error::NotABanker { player: perms.player });
+                    return Err(Error::NotABanker { player: perms.player.into_owned() });
                 }
-                Ok(ActionPermissions{player: proposer.clone(), level: perms.level})
+                Ok(ActionPermissions{player: proposer.shallow_clone(), level: perms.level})
             },
 
             Action::WindUp { account, .. } =>
@@ -658,42 +607,42 @@ impl State {
         }
     }
     /// Nice macro for checking whether a player is a banker
-    fn check_banker(&self, player: &PlayerId) -> Result<()> {
+    fn check_banker(&self, player: &AccountId) -> Result<()> {
         if self.is_banker(player) {
             Ok(())
         }
         else {
-            Err(Error::NotABanker { player: player.clone() })
+            Err(Error::NotABanker { player: player.deep_clone() })
         }
     }
     // Atomic (but not parallelisable!).
     // This means the function will change significant things (i.e. more than just creating empty lists) IF AND ONLY IF it fully succeeds.
     // As such, we don't have to worry about giving it bad actions
-    fn apply_inner(&mut self, id: u64, action: Action) -> Result<()> {
+    fn apply_inner<'a, 'b>(&'a mut self, id: u64, action: Action<'b>) -> Result<()> {
         // Blanket check perms
         //
         // TODO: optimise
         if let ActionPermissions { level: ActionLevel::Banker, player } = self.perms(&action)?
             && !self.is_banker(&player) {
-                return Err(Error::NotABanker { player });
+                return Err(Error::NotABanker { player: player.deep_clone() });
             }
 
         match action {
             Action::Deleted{..} => Ok(()),
             Action::Deposit { player, asset, count, banker } => {
                 self.check_banker(&banker)?;
-                self.balance.commit_asset_add(&player, &asset, count);
+                self.balance.commit_asset_add(player.shallow_clone(), asset.shallow_clone(), count);
                 self.auth.increase_authorisation(player, asset, count).expect("Authorisation overflow");
 
                 Ok(())
             },
             Action::Undeposit { player, asset, count, banker } => {
                 self.check_banker(&banker)?;
-                self.balance.commit_asset_removal(&player, &asset, count)
+                self.balance.commit_asset_removal(player, asset, count)
             },
             Action::RequestWithdrawal { player, assets} => {
                 // Shared accounts cannot directly withdraw
-                if !player.is_unshared() {
+                if !matches!(player, AccountId::Unshared(_)) {
                     return Err(Error::UnsharedOnly)
                 }
                 // There's no good way of doing this without two passes, so we check then commit
@@ -701,11 +650,11 @@ impl State {
                 // BTreeMap ensures that the same asset cannot occur twice, so we don't have to worry about double spending
                 for (asset, count) in assets.iter() {
                     // Check to see if they can afford it
-                    self.balance.check_asset_removal(&player, asset, *count)?;
+                    self.balance.check_asset_removal(player.shallow_clone(), asset.shallow_clone(), *count)?;
                     // Check to see if they are allowed it
                     self.auth.check_withdrawal_authorized(&player, asset, *count)?;
                     // Check to make sure they're not trying to withdraw ETPs, because that makes no sense
-                    if ETPId::is_etp(asset) {
+                    if matches!(asset, AssetId::ETP(_)) {
                         return Err(Error::UnauthorisedWithdrawal { asset: asset.clone(), amount_overdrawn: None })
                     }
                 }
@@ -713,7 +662,7 @@ impl State {
                 // Now take the assets, as we've confirmed they can afford it
                 for (asset, count) in assets.iter() {
                     // Remove assets
-                    self.balance.commit_asset_removal(&player, asset, *count).expect("Assets disappeared after check");
+                    self.balance.commit_asset_removal(player.shallow_clone(), asset.shallow_clone(), *count).expect("Assets disappeared after check");
                     // Remove allowance if restricted
                     self.auth.commit_withdrawal_authorized(&player, asset, *count).expect("Auth disappeared after check");
                 }
@@ -728,8 +677,8 @@ impl State {
                 let withdrawal = self.withdrawal.finalise(target)?;
                 // Credit the account and reauthorise the assets
                 for (asset, count) in withdrawal.assets {
-                    self.balance.commit_asset_add(&withdrawal.player, &asset, count);
-                    self.auth.increase_authorisation(withdrawal.player.clone(), asset.clone(), count).expect("Authorisation overflow in cancelled order");
+                    self.balance.commit_asset_add(withdrawal.player.shallow_clone(), asset.shallow_clone(), count);
+                    self.auth.increase_authorisation(withdrawal.player.shallow_clone(), asset.shallow_clone(), count).expect("Authorisation overflow in cancelled order");
                 }
                 Ok(())
             }
@@ -738,17 +687,17 @@ impl State {
                     return Err(Error::AlreadyDone)
                 }
                 // Check and take their assets first
-                self.balance.commit_asset_removal(&player, &asset, count)?;
+                self.balance.commit_asset_removal(player.shallow_clone(), asset.shallow_clone(), count)?;
                 // Do the matching and listing
                 let res = self.order.handle_sell(id, &player, &asset, count, coins_per, self.rates.sell_order_ppm);
                 // Transfer the assets
                 for (buyer, count) in res.assets_instant_matched {
-                    self.balance.commit_asset_add(&buyer, &asset, count);
+                    self.balance.commit_asset_add(buyer, asset.shallow_clone(), count);
                 }
                 // Transfer the money
-                self.balance.commit_coin_add(&player, res.coins_instant_earned);
+                self.balance.commit_coin_add(player, res.coins_instant_earned);
                 // Pay the bank
-                self.balance.commit_coin_add(&PlayerId::the_bank(), res.instant_bank_fee);
+                self.balance.commit_coin_add(AccountId::THE_BANK, res.instant_bank_fee);
 
                 Ok(())
             },
@@ -759,22 +708,22 @@ impl State {
                 // Check their money first
                 let mut max_cost = coins_per.checked_mul(count)?;
                 max_cost.checked_add_assign(max_cost.fee_ppm(self.rates.buy_order_ppm)?)?;
-                self.balance.check_coin_removal(&player, max_cost)?;
+                self.balance.check_coin_removal(player.shallow_clone(), max_cost)?;
 
                 // Do the matching and listing
                 let res = self.order.handle_buy(id, &player, &asset, count, coins_per, self.rates.buy_order_ppm);
                 // Transfer the money
-                self.balance.commit_coin_removal(&player, res.cost).expect("Somehow used more money in buy order than expected");
+                self.balance.commit_coin_removal(player.shallow_clone(), res.cost).expect("Somehow used more money in buy order than expected");
                 // Pay the sellers
                 for (seller, coins) in res.sellers {
-                    self.balance.commit_coin_add(&seller, coins)
+                    self.balance.commit_coin_add(seller, coins)
                 }
                 // Transfer the assets
                 if res.assets_instant_matched > 0 {
-                    self.balance.commit_asset_add(&player, &asset, res.assets_instant_matched);
+                    self.balance.commit_asset_add(player, asset, res.assets_instant_matched);
                 }
                 // Pay the bank
-                self.balance.commit_coin_add(&PlayerId::the_bank(), res.instant_bank_fee);
+                self.balance.commit_coin_add(AccountId::THE_BANK, res.instant_bank_fee);
 
                 Ok(())
             },
@@ -787,32 +736,32 @@ impl State {
             Action::CancelOrder { target } => {
                 match self.order.cancel(target)? {
                     order::CancelResult::BuyOrder { player, refund_coins } => {
-                        self.balance.commit_coin_add(&player, refund_coins);
+                        self.balance.commit_coin_add(player, refund_coins);
                     },
                     order::CancelResult::SellOrder { player, refunded_asset, refund_count } => {
-                        self.balance.commit_asset_add(&player, &refunded_asset, refund_count);
+                        self.balance.commit_asset_add(player, refunded_asset, refund_count);
                     }
                 }
                 Ok(())
             },
             Action::BuyCoins { player, n_diamonds } => {
                 // Check and take diamonds from payer...
-                self.balance.commit_asset_removal(&player,&DIAMOND_NAME.to_owned(), n_diamonds)?;
+                self.balance.commit_asset_removal(player.shallow_clone(), AssetId::DIAMOND, n_diamonds)?;
                 // ... and give them the coins
                 let n_coins = DIAMOND_RAW_COINS.checked_mul(n_diamonds).expect("BuyCoins overflow");
                 let fee = n_coins.fee_ppm(self.rates.coins_buy_ppm).expect("BuyCoins fee overflow"); // This panic stops inconsistencies
-                self.balance.commit_coin_add(&PlayerId::the_bank(), fee);
-                self.balance.commit_coin_add(&player, n_coins.checked_sub(fee).unwrap()); // This panic stops inconsistencies
+                self.balance.commit_coin_add(AccountId::THE_BANK, fee);
+                self.balance.commit_coin_add(player, n_coins.checked_sub(fee).unwrap()); // This panic stops inconsistencies
                 Ok(())
             },
             Action::SellCoins { player, n_diamonds } => {
                 // Check and take coins from payer...
                 let n_coins = DIAMOND_RAW_COINS.checked_mul(n_diamonds)?;
                 let fee = n_coins.fee_ppm(self.rates.coins_sell_ppm)?; // This panic stops inconsistencies
-                self.balance.commit_coin_removal(&player, n_coins.checked_add(fee)?)?;
-                self.balance.commit_coin_add(&PlayerId::the_bank(), fee);
+                self.balance.commit_coin_removal(player.shallow_clone(), n_coins.checked_add(fee)?)?;
+                self.balance.commit_coin_add(AccountId::THE_BANK, fee);
                 // ... and give them the diamonds
-                self.balance.commit_asset_add(&player, &DIAMOND_NAME.to_owned(), n_diamonds);
+                self.balance.commit_asset_add(player, AssetId::DIAMOND, n_diamonds);
                 Ok(())
             },
             Action::UpdateRestricted { restricted_assets} => {
@@ -842,16 +791,16 @@ impl State {
             },
             Action::TransferCoins { payer, payee, count } => {
                 // Check and take money from payer...
-                self.balance.commit_coin_removal(&payer, count)?;
+                self.balance.commit_coin_removal(payer, count)?;
                 // ... and give it to payee
-                self.balance.commit_coin_add(&payee, count);
+                self.balance.commit_coin_add(payee, count);
                 Ok(())
             },
             Action::TransferAsset { payer, payee, asset, count } => {
                 // Check and take assets from payer...
-                self.balance.commit_asset_removal(&payer, &asset, count)?;
+                self.balance.commit_asset_removal(payer.shallow_clone(), asset.shallow_clone(), count)?;
                 // ... and give it to payee
-                self.balance.commit_asset_add(&payee,  &asset, count);
+                self.balance.commit_asset_add(payee, asset, count);
                 Ok(())
             },
             Action::CreateOrUpdateShared { name, owners, min_difference, min_votes  } => {
@@ -888,9 +837,11 @@ impl State {
             },
             Action::Disagree { player, proposal_id } => {
                 if let Some(action) = self.shared_account.vote(proposal_id, player, false)? {
-                    self.apply_inner(id, action)?
+                    self.apply_inner(id, action)
                 }
-                Ok(())
+                else {
+                    Ok(())
+                }
             },
             Action::Agree { player, proposal_id } => {
                 if let Some(action) = self.shared_account.vote(proposal_id, player, true)? {
@@ -899,18 +850,19 @@ impl State {
                 Ok(())
             },
             Action::WindUp { account } => {
-                let parent = account.parent().ok_or(Error::InvalidSharedId)?;
-                self.shared_account.wind_up(account, |account| {
+                let parent: AccountId = account.parent().ok_or(Error::InvalidSharedId)?.into();
+                self.shared_account.wind_up(account.shallow_clone(), |account| {
+                    let account = account.into();
                     // Move all the assets to the parent
-                    let assets = self.balance.get_assets(account.as_ref());
+                    let assets = self.balance.get_assets(&account);
                     for (asset, count) in assets {
-                        self.balance.commit_asset_removal(account.as_ref(), &asset, count).expect("Failed to remove assets in windup");
-                        self.balance.commit_asset_add(parent.as_ref(), &asset, count);
+                        self.balance.commit_asset_removal(account.shallow_clone(), asset.shallow_clone(), count).expect("Failed to remove assets in windup");
+                        self.balance.commit_asset_add(parent.shallow_clone(), asset, count);
                     }
                     // Move all the coins to the parent
-                    let coins = self.balance.get_bal(account.as_ref());
-                    self.balance.commit_coin_removal(account.as_ref(), coins).expect("Failed to remove coins in windup");
-                    self.balance.commit_coin_add(parent.as_ref(), coins);
+                    let coins = self.balance.get_bal(&account);
+                    self.balance.commit_coin_removal(account, coins).expect("Failed to remove coins in windup");
+                    self.balance.commit_coin_add(parent.shallow_clone(), coins);
                 })
             },
             Action::UpdateETPAuthorised { accounts } => {
@@ -918,15 +870,15 @@ impl State {
                 Ok(())
             },
             Action::Issue { product, count } => {
-                if !self.auth.is_etp_authorised(product.issuer()) {
-                    return Err(Error::UnauthorisedIssue{account: product.issuer().clone()})
+                if !self.auth.is_etp_authorised(&product.issuer()) {
+                    return Err(Error::UnauthorisedIssue{account: product.issuer().deep_clone()})
                 }
-                self.balance.commit_asset_add(product.issuer().as_ref(), &(&product).into(), count as u64);
+                self.balance.commit_asset_add(product.issuer().shallow_clone().into(), product.shallow_clone().into(), count as u64);
                 Ok(())
             },
             Action::Remove { product, count } => {
                 // We don't check to see if they are currently allowed to issue, because they are only removing owned assets that they issued
-                self.balance.commit_asset_removal(product.issuer().as_ref(), &(&product).into(), count)
+                self.balance.commit_asset_removal(AccountId::from(product.issuer().shallow_clone()), product.shallow_clone().into(), count)
             },
         }
     }
@@ -961,7 +913,7 @@ impl State {
         Ok(())
     }
     /// Atomically try to apply an action with a give time, and if successful, write to given stream
-    pub async fn apply_with_time(&mut self, action: Action, time: chrono::DateTime<chrono::Utc>, out: impl tokio::io::AsyncWrite) -> Result<u64> {
+    pub async fn apply_with_time<'a>(&mut self, action: Action<'a>, time: chrono::DateTime<chrono::Utc>, out: impl tokio::io::AsyncWrite) -> Result<u64> {
         let id = self.next_id;
         let wrapped_action = WrappedAction {
             id,
@@ -990,7 +942,7 @@ impl State {
         self.apply_with_time(action, chrono::Utc::now(), out)
     }
     /// Atomically try to apply an action, and if successful, write to given stream
-    pub async fn apply_wrapped(&mut self, wrapped_action: WrappedAction, out: impl tokio::io::AsyncWrite) -> Result<u64> {
+    pub async fn apply_wrapped<'a>(&mut self, wrapped_action: WrappedAction<'a>, out: impl tokio::io::AsyncWrite) -> Result<u64> {
         if wrapped_action.id != self.next_id {
             return Err(Error::InvalidId { id: wrapped_action.id })
         }

@@ -4,7 +4,7 @@ use axum::{http::StatusCode};
 use axum_extra::headers::{authorization::Bearer, Authorization, HeaderMapExt};
 use num_traits::FromPrimitive;
 use tokio::io::{AsyncBufRead, AsyncSeek, AsyncWrite};
-use tpex::PlayerId;
+use tpex::AccountId;
 use crate::shared::*;
 
 use super::state::StateStruct;
@@ -46,7 +46,7 @@ impl TokenHandler {
 
         Ok(ret)
     }
-    pub async fn create_token(&self, level: TokenLevel, user: PlayerId) -> sqlx::Result<Token> {
+    pub async fn create_token(&self, level: TokenLevel, user: AccountId) -> sqlx::Result<Token> {
         let token = Token::generate();
 
         let slice = token.0.as_slice();
@@ -67,7 +67,7 @@ impl TokenHandler {
         Ok(TokenInfo {
             token: Token(query.token.try_into().expect("Mismatched token length")),
             #[allow(deprecated)]
-            user: tpex::PlayerId::assume_username_correct(query.user),
+            user: tpex::AccountId::assume_username_correct(query.user),
             level: TokenLevel::from_i64(query.level).expect("Invalid token level")
         })
     }

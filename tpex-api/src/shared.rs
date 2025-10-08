@@ -2,7 +2,7 @@ use std::{fmt::Display, str::FromStr};
 
 use num_traits::FromPrimitive;
 use serde::{de::Visitor, Deserialize, Serialize};
-use tpex::PlayerId;
+use tpex::AccountId;
 use base64::prelude::*;
 
 #[repr(u8)]
@@ -105,7 +105,7 @@ impl<'de> Deserialize<'de> for Token {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenInfo {
     pub token: Token,
-    pub user: PlayerId,
+    pub user: AccountId,
     pub level: TokenLevel
 }
 
@@ -113,7 +113,7 @@ pub struct TokenInfo {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TokenPostArgs {
     pub level: TokenLevel,
-    pub user: PlayerId
+    pub user: AccountId
 }
 
 #[derive(Default, Debug, Clone)]
@@ -141,12 +141,12 @@ pub struct ErrorInfo {
 #[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InspectBalanceGetArgs {
-    pub player: PlayerId
+    pub player: AccountId
 }
 #[derive(Default, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InspectAssetsGetArgs {
-    pub player: PlayerId
+    pub player: AccountId
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

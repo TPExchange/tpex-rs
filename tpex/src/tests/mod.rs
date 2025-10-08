@@ -1,6 +1,7 @@
 #![cfg(test)]
 
-use std::{collections::{BTreeMap, HashMap}, fmt::Display};
+use std::{collections::{BTreeMap}, fmt::Display};
+use hashbrown::HashMap;
 
 use tokio::io::sink;
 
@@ -81,20 +82,20 @@ async fn init_state() {
     let state = State::new();
     assert_eq!(state.hard_audit(), Audit::default());
 }
-fn player(n: u64) -> PlayerId { PlayerId::assume_username_correct(n.to_string()) }
+fn player(n: u64) -> AccountId<'static> { AccountId::try_from(n.to_string()).unwrap() }
 
 #[tokio::test]
 async fn deposit_undeposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
-    let item = "cobblestone".to_owned();
+    let item = AssetId::try_from("cobblestone").unwrap();
 
     state.apply(Action::Deposit {
         player: player(1),
         asset: item.clone(),
         count: 16384,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Deposit failed");
     assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), Some(16384));
     assert_eq!(state.hard_audit(), Audit{coins: Coins::default(), assets: [(item.clone(), 16384)].into_iter().collect()});
@@ -102,7 +103,7 @@ async fn deposit_undeposit() {
         player: player(1),
         asset: item.clone(),
         count: 16384,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Undeposit failed");
     assert_eq!(state.hard_audit(), Audit::default());
 }
@@ -112,27 +113,27 @@ async fn undeposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
-    let item = "cobblestone".to_owned();
+    let item = AssetId::try_from("cobblestone").unwrap();
 
     state.apply(Action::Deposit {
         player: player(1),
         asset: item.clone(),
         count: 49,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Deposit failed");
     assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), Some(49));
     state.apply(Action::Undeposit {
         player: player(1),
         asset: item.clone(),
         count: 48,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, &mut sink).await.expect("First undeposit failed");
     assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), Some(1));
     state.apply(Action::Undeposit {
         player: player(1),
         asset: item.clone(),
         count: 1,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Second undeposit failed");
     assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), None);
     assert_eq!(state.hard_audit(), Audit::default());
@@ -165,27 +166,27 @@ fn check_fee_calc() {
 }
 
 #[derive(Default)]
-struct ExpectedState {
-    sell_profit: Vec<(PlayerId, Coins)>,
-    buy_cost: Vec<(PlayerId, Coins)>,
-    coins_appeared: Vec<(PlayerId, Coins)>,
-    coins_disappeared: Vec<(PlayerId, Coins)>,
-    diamonds_sold: Vec<(PlayerId, u64)>,
-    diamonds_bought: Vec<(PlayerId, u64)>,
-    assets: Vec<(PlayerId, String, u64)>,
-    unfulfilled: Vec<(PlayerId, Coins)>,
-    fulfilled: Vec<(PlayerId, Coins)>,
+struct ExpectedState<'a> {
+    sell_profit: Vec<(AccountId<'a>, Coins)>,
+    buy_cost: Vec<(AccountId<'a>, Coins)>,
+    coins_appeared: Vec<(AccountId<'a>, Coins)>,
+    coins_disappeared: Vec<(AccountId<'a>, Coins)>,
+    diamonds_sold: Vec<(AccountId<'a>, u64)>,
+    diamonds_bought: Vec<(AccountId<'a>, u64)>,
+    assets: Vec<(AccountId<'a>, AssetId<'a>, u64)>,
+    unfulfilled: Vec<(AccountId<'a>, Coins)>,
+    fulfilled: Vec<(AccountId<'a>, Coins)>,
     should_fail: bool
 }
-struct MatchStateWrapper<Players, Sink: tokio::io::AsyncWrite + std::marker::Unpin> where for<'a> &'a Players: IntoIterator<Item=&'a PlayerId> {
+struct MatchStateWrapper<Sink: tokio::io::AsyncWrite + std::marker::Unpin> {
     state: State,
     sink: Sink,
-    players: Players
+    players: Vec<AccountId<'static>>
 }
-impl<Players, Sink: tokio::io::AsyncWrite + std::marker::Unpin> MatchStateWrapper<Players, Sink> where for<'a> &'a Players: IntoIterator<Item=&'a PlayerId> {
-    async fn assert_state(&mut self, action: Action, expected: ExpectedState) -> Option<u64> {
+impl<Sink: tokio::io::AsyncWrite + std::marker::Unpin> MatchStateWrapper<Sink> {
+    async fn assert_state(&mut self, action: Action<'_>, expected: ExpectedState<'_>) -> Option<u64> {
         let before_bals = self.state.get_bals();
-        // let before_assets: std::collections::HashMap<_, _, std::hash::RandomState> = ((&self.players).into_iter().map(|i| (i.clone(), self.state.get_assets(&i)))).collect();
+        // let before_assets: HashMap<_, _, std::hash::RandomState> = ((&self.players).into_iter().map(|i| (i.clone(), self.state.get_assets(&i)))).collect();
         let ret =
             if !expected.should_fail {
                 Some(self.state.apply(action, &mut self.sink).await.expect("Failed action"))
@@ -206,32 +207,32 @@ impl<Players, Sink: tokio::io::AsyncWrite + std::marker::Unpin> MatchStateWrappe
             let buy_fee = gain.fee_ppm(self.state.rates.buy_order_ppm).unwrap();
             let expected_amount = gain.checked_sub(buy_fee).expect("Failed to subtract buy fee");
             expected_bals.entry(p).or_default().checked_add_assign(expected_amount).expect("Failed to add net gain");
-            expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(buy_fee).expect("Failed to add fee");
+            expected_bals.entry(AccountId::THE_BANK).or_default().checked_add_assign(buy_fee).expect("Failed to add fee");
         }
         for (p, loss) in expected.buy_cost {
             let sell_fee = loss.fee_ppm(self.state.rates.sell_order_ppm).unwrap();
             let expected_amount = loss.checked_add(sell_fee).expect("Failed to add sell fee");
             expected_bals.entry(p).or_default().checked_sub_assign(expected_amount).expect("Failed to take net loss");
-            expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(sell_fee).expect("Failed to add fee");
+            expected_bals.entry(AccountId::THE_BANK).or_default().checked_add_assign(sell_fee).expect("Failed to add fee");
         }
         for (_p, gain) in expected.unfulfilled {
             let buy_fee = gain.fee_ppm(self.state.rates.buy_order_ppm).unwrap();
-            expected_bals.entry(PlayerId::the_bank()).or_default().checked_sub_assign(buy_fee).expect("Failed to sub unfulfilled fee");
+            expected_bals.entry(AccountId::THE_BANK).or_default().checked_sub_assign(buy_fee).expect("Failed to sub unfulfilled fee");
         }
         for (_p, gain) in expected.fulfilled {
             let buy_fee = gain.fee_ppm(self.state.rates.buy_order_ppm).unwrap();
-            expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(buy_fee).expect("Failed to add fulfilled fee");
+            expected_bals.entry(AccountId::THE_BANK).or_default().checked_add_assign(buy_fee).expect("Failed to add fulfilled fee");
         }
         for (p, gain) in expected.diamonds_sold {
             let total = DIAMOND_RAW_COINS.checked_mul(gain).unwrap();
             let fee = total.fee_ppm(self.state.rates.coins_buy_ppm).unwrap();
-            expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(fee).expect("Failed to add fx fee");
+            expected_bals.entry(AccountId::THE_BANK).or_default().checked_add_assign(fee).expect("Failed to add fx fee");
             expected_bals.entry(p).or_default().checked_add_assign(total.checked_sub(fee).unwrap()).expect("Failed to add expected balance");
         }
         for (p, gain) in expected.diamonds_bought {
             let total = DIAMOND_RAW_COINS.checked_mul(gain).unwrap();
             let fee = total.fee_ppm(self.state.rates.coins_sell_ppm).unwrap();
-            expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(fee).expect("Failed to add fx fee");
+            expected_bals.entry(AccountId::THE_BANK).or_default().checked_add_assign(fee).expect("Failed to add fx fee");
             expected_bals.entry(p).or_default().checked_sub_assign(total.checked_add(fee).unwrap()).expect("Failed to add expected balance");
         }
         // expected_bals.entry(PlayerId::the_bank()).or_default().checked_add_assign(self.total_fee).expect("Failed to add total fee");
@@ -239,12 +240,12 @@ impl<Players, Sink: tokio::io::AsyncWrite + std::marker::Unpin> MatchStateWrappe
         expected_bals.retain(|_, &mut j| !j.is_zero());
         after_bals.retain(|_, j| !j.is_zero());
         assert_eq!(after_bals, expected_bals, "Started at {before_bals:?} (after != expected)");
-        let result_assets: std::collections::HashMap<_, _, std::hash::RandomState> =
-            (&self.players).into_iter()
+        let result_assets: HashMap<_, _> =
+            self.players.iter()
             .map(|i| (i.clone(), self.state.get_assets(i)))
             .filter(|(_, j)| !j.is_empty())
             .collect();
-        let mut expected_assets: HashMap<PlayerId, HashMap<String, u64>> = HashMap::new();
+        let mut expected_assets: HashMap<AccountId, HashMap<AssetId, u64>> = HashMap::new();
         for (p, item, count) in expected.assets {
             if count == 0 {
                 continue;
@@ -264,10 +265,10 @@ async fn lifecycle() {
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: Vec::new(),
-        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+        players: vec![player(1), player(2), player(3), AccountId::THE_BANK]
     };
 
-    let item = "cobblestone".to_owned();
+    let item = AssetId::try_from("cobblestone").unwrap();
 
     println!("Deposit 1");
     state.assert_state(
@@ -275,7 +276,7 @@ async fn lifecycle() {
             player: player(1),
             asset: item.clone(),
             count: 64,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
             assets: vec![(player(1), item.clone(), 64)],
@@ -288,7 +289,7 @@ async fn lifecycle() {
             player: player(2),
             asset: item.clone(),
             count: 128,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
             assets: vec![(player(1), item.clone(), 64), (player(2), item.clone(), 128)],
@@ -299,12 +300,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::Deposit {
             player: player(3),
-            asset: DIAMOND_NAME.to_owned(),
+            asset: AssetId::DIAMOND,
             count: 64,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64), (player(2), item.clone(), 128), (player(3), DIAMOND_NAME.to_owned(), 64)],
+            assets: vec![(player(1), item.clone(), 64), (player(2), item.clone(), 128), (player(3), AssetId::DIAMOND, 64)],
             ..Default::default()
         }
     ).await;
@@ -564,7 +565,7 @@ async fn lifecycle() {
             n_diamonds: 32,
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 120), (player(3), DIAMOND_NAME.to_owned(), 32)],
+            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 120), (player(3), AssetId::DIAMOND, 32)],
             diamonds_bought: vec![(player(3), 32)],
             ..Default::default()
         }
@@ -578,7 +579,7 @@ async fn lifecycle() {
             assets: [(item.clone(), 192)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 120), (player(3), DIAMOND_NAME.to_owned(), 32)],
+            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 120), (player(3), AssetId::DIAMOND, 32)],
             should_fail: true,
             ..Default::default()
         }
@@ -591,7 +592,7 @@ async fn lifecycle() {
             assets: [(item.clone(), 120)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 0), (player(3), DIAMOND_NAME.to_owned(), 32)],
+            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 0), (player(3), AssetId::DIAMOND, 32)],
             ..Default::default()
         }
     ).await.unwrap();
@@ -600,10 +601,10 @@ async fn lifecycle() {
     state.assert_state(
         Action::CompleteWithdrawal {
             target,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 0), (player(3), DIAMOND_NAME.to_owned(), 32)],
+            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 0), (player(3), AssetId::DIAMOND, 32)],
             ..Default::default()
         }
     ).await;
@@ -621,12 +622,12 @@ async fn lifecycle() {
 
 #[tokio::test]
 async fn authorisations() {
-    let authed = AssetId::from("cobblestone");
-    let unauthed = AssetId::from("wither_skeleton_skull");
+    let authed = AssetId::try_from("cobblestone").unwrap();
+    let unauthed = AssetId::try_from("wither_skeleton_skull").unwrap();
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
-        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+        players: vec![player(1), player(2), player(3), AccountId::THE_BANK]
     };
     println!("Depositing authorised item");
     state.assert_state(
@@ -634,7 +635,7 @@ async fn authorisations() {
             player: player(1),
             asset: authed.clone(),
             count: 1,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
             assets: vec![(player(1), authed.clone(), 1)],
@@ -647,7 +648,7 @@ async fn authorisations() {
             player: player(1),
             asset: unauthed.clone(),
             count: 100,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
             assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 100)],
@@ -775,13 +776,13 @@ async fn update_bankers() {
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
-        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+        players: vec![player(1), player(2), player(3), AccountId::THE_BANK]
     };
     assert!(!state.state.is_banker(&player(1)));
     println!("Replacing default banker");
     state.assert_state(
         Action::CreateOrUpdateShared {
-            name: SharedId::the_bank(),
+            name: SharedId::THE_BANK,
             owners: vec![player(1), player(3)],
             min_difference: 1,
             min_votes: 1,
@@ -795,12 +796,12 @@ async fn update_bankers() {
     state.assert_state(
         Action::Propose {
             action: Box::new(Action::CreateOrUpdateShared {
-                name: SharedId::the_bank(),
+                name: SharedId::THE_BANK,
                 owners: vec![player(1), player(3)],
                 min_difference: 1,
                 min_votes: 1,
             }),
-            target: SharedId::the_bank(),
+            target: SharedId::THE_BANK,
             proposer: player(2)
         },
         ExpectedState {
@@ -812,12 +813,12 @@ async fn update_bankers() {
     state.assert_state(
         Action::Propose {
             action: Box::new(Action::CreateOrUpdateShared {
-                name: SharedId::the_bank(),
+                name: SharedId::THE_BANK,
                 owners: vec![player(2), player(3)],
                 min_difference: 1,
                 min_votes: 1,
             }),
-            target: SharedId::the_bank(),
+            target: SharedId::THE_BANK,
             proposer: player(1)
         },
         ExpectedState {
@@ -831,15 +832,15 @@ async fn transfer_asset() {
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
-        players: [player(1), player(2), player(3), PlayerId::the_bank()]
+        players: vec![player(1), player(2), player(3), AccountId::THE_BANK]
     };
-    let item = "cobblestone".to_owned();
+    let item = AssetId::try_from("cobblestone").unwrap();
     state.assert_state(
         Action::Deposit {
             player: player(1),
             asset: item.clone(),
             count: 64,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
             assets: vec![(player(1), item.clone(), 64)],
@@ -849,12 +850,12 @@ async fn transfer_asset() {
     state.assert_state(
         Action::Deposit {
             player: player(2),
-            asset: DIAMOND_NAME.to_owned(),
+            asset: AssetId::DIAMOND,
             count: 2,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64), (player(2), DIAMOND_NAME.to_owned(), 2)],
+            assets: vec![(player(1), item.clone(), 64), (player(2), AssetId::DIAMOND, 2)],
             ..Default::default()
         }
     ).await;
@@ -914,10 +915,11 @@ async fn transfer_asset() {
 async fn reload_state() {
     let mut state = State::new();
     let mut log = Vec::new();
+    let item = AssetId::try_from("cobblestone").unwrap();
     for i in [
-        Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 1, banker: PlayerId::the_bank() },
-        Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 2, banker: PlayerId::the_bank() },
-        Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 3, banker: PlayerId::the_bank() },
+        Action::Deposit { player: player(1), asset: item.shallow_clone(), count: 1, banker: AccountId::THE_BANK },
+        Action::Deposit { player: player(1), asset: item.shallow_clone(), count: 2, banker: AccountId::THE_BANK },
+        Action::Deposit { player: player(1), asset: item.shallow_clone(), count: 3, banker: AccountId::THE_BANK },
     ] { state.apply(i, &mut log).await.expect("Failed to apply action"); }
 
     let mut loaded_state = State::new();
@@ -925,33 +927,13 @@ async fn reload_state() {
     assert_eq!(StateSync::from(&loaded_state), StateSync::from(&state));
 }
 
-#[test]
-fn fuzz_shared_id() {
-    assert!(SharedId::the_bank().take_name().is_none());
-    assert_eq!(SharedId::the_bank().parts().collect::<Vec<&str>>(), Vec::<&str>::new(), "Bank had parts");
-
-    SharedId::try_from(PlayerId::assume_username_correct("foo".to_owned())).expect_err("Invalid SharedId got through");
-    SharedId::try_from(PlayerId::assume_username_correct("foo.".to_owned())).expect_err("Invalid SharedId got through");
-    SharedId::try_from(PlayerId::assume_username_correct(".foo.".to_owned())).expect_err("Invalid SharedId got through");
-
-    let single = SharedId::try_from(PlayerId::assume_username_correct(".foo".to_owned())).expect("Could not parse valid SharedId");
-    let (parent, name) = single.take_name().expect("Single name didn't have a name");
-    assert_eq!(parent.collect::<Vec<&str>>(), Vec::<&str>::new(), "Somehow had parent in single name");
-    assert_eq!(name, "foo");
-    assert_eq!(single.parent(), Some(SharedId::the_bank()));
-    let multi = SharedId::try_from(PlayerId::assume_username_correct(".foo.bar".to_owned())).expect("Could not parse valid SharedId");
-    let (parent, name) = multi.take_name().expect("Multi name didn't have a name");
-    assert_eq!(parent.collect::<Vec<_>>(), vec!["foo"]);
-    assert_eq!(name, "bar");
-}
-
 #[tokio::test]
 async fn test_shared() {
-    let shared_name: SharedId = ".foo".parse().expect("Could not parse name");
+    let shared_name: SharedId = ".foo".try_into().expect("Could not parse name");
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
-        players: [player(1), player(2), player(3), shared_name.clone().into(), PlayerId::the_bank()]
+        players: vec![player(1), player(2), player(3), shared_name.clone().into(), AccountId::THE_BANK]
     };
     // Try with invalid consensus
     state.assert_state(
@@ -966,7 +948,7 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await;
-    let shared_name2: SharedId = ".foo2".parse().expect("Could not parse name");
+    let shared_name2: SharedId = ".foo2".try_into().expect("Could not parse name");
     // Try with invalid consensus
     state.assert_state(
         Action::CreateOrUpdateShared {
@@ -1020,12 +1002,12 @@ async fn test_shared() {
     state.assert_state(
         Action::Deposit {
             player: player(1),
-            asset: "diamond".into(),
+            asset: AssetId::DIAMOND,
             count: 16,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), "diamond".into(), 16)],
+            assets: vec![(player(1), AssetId::DIAMOND, 16)],
             ..Default::default()
         }
     ).await;
@@ -1250,12 +1232,12 @@ async fn test_shared() {
         Action::Propose {
             proposer: player(1),
             action: Box::new(Action::CreateOrUpdateShared {
-                name: ".bar".parse().unwrap(),
+                name: ".bar".try_into().unwrap(),
                 owners: vec![player(3)],
                 min_difference: 1,
                 min_votes: 1
             }),
-            target: ".foo".parse().unwrap()
+            target: ".foo".try_into().unwrap()
         },
         ExpectedState {
             should_fail: true,
@@ -1263,7 +1245,7 @@ async fn test_shared() {
         }
     ).await;
     // They do it properly this time
-    let child_name: SharedId = ".foo.bar".parse().unwrap();
+    let child_name: SharedId = ".foo.bar".try_into().unwrap();
     let proposal4 = state.assert_state(
         Action::Propose {
             proposer: player(1),
@@ -1273,7 +1255,7 @@ async fn test_shared() {
                 min_difference: 1,
                 min_votes: 1
             }),
-            target: ".foo".parse().unwrap()
+            target: ".foo".try_into().unwrap()
         },
         ExpectedState {
             ..Default::default()
@@ -1340,40 +1322,31 @@ async fn test_shared() {
         }
     ).await;
     let fs = StateSync::from(&state.state);
-    assert_eq!(fs.shared_account.bank.children().keys().cloned().collect::<Vec<String>>(), vec!["foo".to_owned()]);
+    assert_eq!(fs.shared_account.bank.children().keys().cloned().collect::<Vec<UnsharedId>>(), vec![UnsharedId::try_from("foo").unwrap()]);
     // The bank winds up the company
     state.assert_state(
         Action::Propose {
             action: Box::new(Action::WindUp {
                 account: shared_name.clone()
             }),
-            proposer: PlayerId::the_bank(),
-            target: SharedId::the_bank()
+            proposer: AccountId::THE_BANK,
+            target: SharedId::THE_BANK
         },
         ExpectedState {
-            coins_appeared: vec![(PlayerId::the_bank(), Coins::from_coins(1970))],
+            coins_appeared: vec![(AccountId::THE_BANK, Coins::from_coins(1970))],
             coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(1969)), (child_name.clone().into(), Coins::from_coins(1))],
             ..Default::default()
         }
     ).await;
 }
-#[test]
-fn fuzz_etp() {
-    let shared_name: SharedId = ".foo".parse().expect("Could not parse name");
-    assert!(ETPId::try_new(shared_name.clone(), ":foobar".to_owned()).is_err());
-    assert!(ETPId::try_new(shared_name.clone(), "f:oobar".to_owned()).is_err());
-    assert_eq!(AssetId::from(&ETPId::try_new(shared_name.clone(), "foobar".to_owned()).unwrap()), AssetId::from(".foo:foobar"));
-    assert_eq!(AssetId::from(&ETPId::try_new(SharedId::the_bank(), "foobar".to_owned()).unwrap()), AssetId::from(".:foobar"));
-    assert_eq!(ETPId::try_from(AssetId::from(".:foobar")).unwrap(), ETPId::try_new(SharedId::the_bank(), "foobar".to_owned()).unwrap());
-}
 
 #[tokio::test]
 async fn issue_etp() {
-    let shared_name: SharedId = ".foo".parse().expect("Could not parse name");
+    let shared_name: SharedId = ".foo".try_into().expect("Could not parse name");
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
-        players: [player(1), player(2), player(3), shared_name.clone().into(), PlayerId::the_bank()]
+        players: vec![player(1), player(2), player(3), shared_name.clone().into(), AccountId::THE_BANK]
     };
     // Create the issuer
     state.assert_state(
@@ -1387,7 +1360,7 @@ async fn issue_etp() {
             ..Default::default()
         }
     ).await;
-    let etp = ETPId::try_new(shared_name.clone(), "foobar".to_owned()).expect("Valid ETP name still threw error");
+    let etp = ETPId::create(shared_name.clone(), "foobar".try_into().expect("Valid ETP name still threw error"));
     // Ensure that ETPs need authorisation
     state.assert_state(
         Action::Issue {
@@ -1467,11 +1440,11 @@ async fn issue_etp() {
 
 #[tokio::test]
 async fn withdrawal() {
-    let asset = AssetId::from("cobblestone");
+    let asset = AssetId::try_from("cobblestone").unwrap();
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
-        players: [player(1)]
+        players: vec![player(1)]
     };
     // Deposit some item
     state.assert_state(
@@ -1479,7 +1452,7 @@ async fn withdrawal() {
             player: player(1),
             asset: asset.clone(),
             count: 64,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState { assets: vec![(player(1), asset.clone(), 64)], ..Default::default() }
     ).await;
@@ -1495,7 +1468,7 @@ async fn withdrawal() {
     state.assert_state(
         Action::CancelWithdrawal {
             target: id,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState { assets: vec![(player(1), asset.clone(), 64)], ..Default::default() }
     ).await;
@@ -1511,7 +1484,7 @@ async fn withdrawal() {
     state.assert_state(
         Action::CompleteWithdrawal {
             target: id,
-            banker: PlayerId::the_bank()
+            banker: AccountId::THE_BANK
         },
         ExpectedState { assets: vec![(player(1), asset.clone(), 48)], ..Default::default() }
     ).await;
@@ -1528,18 +1501,18 @@ async fn withdrawal() {
 #[tokio::test]
 async fn test_zero_orders() {
     let mut state = State::new();
-    let asset = "cobblestone".to_owned();
+    let asset = AssetId::try_from("cobblestone").unwrap();
     state.apply(Action::Deposit {
         player: player(1),
-        asset: DIAMOND_NAME.into(),
+        asset: AssetId::DIAMOND,
         count: 100,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit diamonds");
     state.apply(Action::Deposit {
         player: player(1),
         asset: asset.clone(),
         count: 100,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit cobblestone");
     state.apply(Action::BuyCoins {
         player: player(1),
@@ -1547,9 +1520,9 @@ async fn test_zero_orders() {
     }, sink()).await.expect("Unable to buy coins");
     state.apply(Action::Deposit {
         player: player(1),
-        asset: DIAMOND_NAME.into(),
+        asset: AssetId::DIAMOND,
         count: 100,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit diamonds");
     state.apply(Action::BuyCoins {
         player: player(1),
@@ -1571,12 +1544,12 @@ async fn test_zero_orders() {
 #[tokio::test]
 async fn test_zero_cost_buy() {
     let mut state = State::new();
-    let asset = "cobblestone".to_owned();
+    let asset = AssetId::try_from("cobblestone").unwrap();
     state.apply(Action::Deposit {
         player: player(1),
-        asset: DIAMOND_NAME.into(),
+        asset: AssetId::DIAMOND,
         count: 100,
-        banker: PlayerId::the_bank()
+        banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit diamonds");
     state.apply(Action::BuyCoins {
         player: player(1),

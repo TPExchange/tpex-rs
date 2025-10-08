@@ -1,21 +1,21 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Coins;
+use crate::{ids::HashMapCowExt, Coins};
 
-use super::{AssetId, Audit, Auditable, Error, PlayerId};
+use super::{AssetId, Audit, Auditable, Error, AccountId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingSync {
     pub id: u64,
-    pub player: PlayerId,
+    pub player: AccountId<'static>,
     pub amount_remaining: u64,
     pub fee_ppm: u64
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrderSync {
-    pub buy_orders: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, Vec<PendingSync>>>,
-    pub sell_orders: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, Vec<PendingSync>>>,
+    pub buy_orders: hashbrown::HashMap<AssetId<'static>, std::collections::BTreeMap<Coins, Vec<PendingSync>>>,
+    pub sell_orders: hashbrown::HashMap<AssetId<'static>, std::collections::BTreeMap<Coins, Vec<PendingSync>>>,
 }
 
 impl TryInto<OrderTracker> for OrderSync {
@@ -23,10 +23,10 @@ impl TryInto<OrderTracker> for OrderSync {
     fn try_into(self) -> Result<OrderTracker, Error> {
         let mut current_audit = Audit::default();
         let mut orders: std::collections::BTreeMap<u64, PendingOrder> = Default::default();
-        let mut best_buy: std::collections::HashMap<String, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>> = Default::default();
-        let mut best_sell: std::collections::HashMap<String, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>> = Default::default();
+        let mut best_buy: hashbrown::HashMap<AssetId<'static>, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>> = Default::default();
+        let mut best_sell: hashbrown::HashMap<AssetId<'static>, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>> = Default::default();
         for (asset, levels) in self.buy_orders {
-            let entry = best_buy.entry(asset.clone()).or_default();
+            let (asset, entry) = best_buy.cow_get_or_default(asset);
             for (coins_per, pending) in levels {
                 let mut data = std::collections::VecDeque::with_capacity(pending.len());
 
@@ -137,9 +137,9 @@ impl std::fmt::Display for OrderType {
 pub struct PendingOrder {
     pub id: u64,
     pub coins_per: Coins,
-    pub player: PlayerId,
+    pub player: AccountId<'static>,
     pub amount_remaining: u64,
-    pub asset: AssetId,
+    pub asset: AssetId<'static>,
     pub order_type: OrderType,
     pub fee_ppm: u64
 }
@@ -151,26 +151,26 @@ pub(crate) struct BuyData {
     pub assets_instant_matched: u64,
     pub instant_bank_fee: Coins,
     /// Maps sellers to the amount they're owed
-    pub sellers: std::collections::HashMap<PlayerId, Coins>
+    pub sellers: hashbrown::HashMap<AccountId<'static>, Coins>
 }
 
 #[derive(Default)]
 pub(crate) struct SellData {
     pub coins_instant_earned: Coins,
-    pub assets_instant_matched: std::collections::HashMap<PlayerId, u64>,
+    pub assets_instant_matched: hashbrown::HashMap<AccountId<'static>, u64>,
     pub instant_bank_fee: Coins,
 }
 pub(crate) enum CancelResult {
-    BuyOrder{player: PlayerId, refund_coins: Coins},
-    SellOrder{player: PlayerId, refunded_asset: AssetId, refund_count: u64}
+    BuyOrder{player: AccountId<'static>, refund_coins: Coins},
+    SellOrder{player: AccountId<'static>, refunded_asset: AssetId<'static>, refund_count: u64}
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub(crate) struct OrderTracker {
     orders: std::collections::BTreeMap<u64, PendingOrder>,
 
-    best_buy: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
-    best_sell: std::collections::HashMap<AssetId, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
+    best_buy: hashbrown::HashMap<AssetId<'static>, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
+    best_sell: hashbrown::HashMap<AssetId<'static>, std::collections::BTreeMap<Coins, std::collections::VecDeque<u64>>>,
 
     current_audit: Audit
 }
@@ -283,7 +283,7 @@ impl OrderTracker {
     fn remove_best(&mut self, asset: AssetId, order_type: OrderType) -> Option<PendingOrder> {
         let target = match order_type { OrderType::Buy => &mut self.best_buy, OrderType::Sell => &mut self.best_sell };
 
-        let std::collections::hash_map::Entry::Occupied(mut asset_class) = target.entry(asset)
+        let hashbrown::hash_map::RawEntryMut::Occupied(mut asset_class) = target.raw_entry_mut().from_key(asset.as_ref())
         else { panic!("Tried to remove non-existent asset class"); };
         let Some(mut best_level) = (match order_type {
             // Best buy order is the highest
@@ -304,7 +304,7 @@ impl OrderTracker {
     }
 
     #[must_use]
-    pub fn handle_buy(&mut self, id: u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins, fee_ppm: u64) -> BuyData {
+    pub fn handle_buy(&mut self, id: u64, player: &AccountId, asset: &AssetId, count: u64, coins_per: Coins, fee_ppm: u64) -> BuyData {
         let mut ret = BuyData::default();
 
         // Match the orders
@@ -356,8 +356,8 @@ impl OrderTracker {
         if amount_remaining > 0 {
             let mut remaining_cost = coins_per.checked_mul(amount_remaining).expect("Buy order remaining coins overflow");
             remaining_cost.checked_add_assign(remaining_cost.fee_ppm(fee_ppm).expect("Fee overflow")).expect("Buy order remaining fee coins overflow");
-            self.best_buy.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
-            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.clone(), amount_remaining, asset: asset.clone(), order_type: OrderType::Buy, fee_ppm });
+            self.best_buy.cow_get_or_default(asset.shallow_clone()).1.entry(coins_per).or_default().push_back(id);
+            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.deep_clone(), amount_remaining, asset: asset.deep_clone(), order_type: OrderType::Buy, fee_ppm });
             // We are responsible for the coins bound up in the buy order
             self.current_audit.add_coins(remaining_cost);
             ret.cost.checked_add_assign(remaining_cost).expect("Add remaining cost overflow");
@@ -369,7 +369,7 @@ impl OrderTracker {
     }
 
     #[must_use]
-    pub fn handle_sell(&mut self, id:u64, player: &PlayerId, asset: &AssetId, count: u64, coins_per: Coins, fee_ppm: u64) -> SellData {
+    pub fn handle_sell(&mut self, id:u64, player: &AccountId, asset: &AssetId, count: u64, coins_per: Coins, fee_ppm: u64) -> SellData {
         let mut ret = SellData::default();
 
         // Then match the orders
@@ -421,8 +421,8 @@ impl OrderTracker {
 
         // If needs be, list the remaining amount
         if amount_remaining > 0 {
-            self.best_sell.entry(asset.clone()).or_default().entry(coins_per).or_default().push_back(id);
-            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.clone(), amount_remaining, asset: asset.clone(), order_type: OrderType::Sell, fee_ppm });
+            self.best_sell.raw_entry_mut().from_key(asset.as_ref()).or_insert_with(|| (asset.deep_clone(), Default::default())).1.entry(coins_per).or_default().push_back(id);
+            self.orders.insert(id, PendingOrder{ id, coins_per, player: player.deep_clone(), amount_remaining, asset: asset.deep_clone(), order_type: OrderType::Sell, fee_ppm });
         }
 
         // We are responsible for the remaining listed items

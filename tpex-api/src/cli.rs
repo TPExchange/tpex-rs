@@ -88,7 +88,7 @@ async fn main() {
         Command::CashFlow { account , all} => {
             let remote = tpex_api::Remote::new(args.endpoint.clone(), args.token);
             let account = match account {
-                Some(x) => PlayerId::assume_username_correct(x),
+                Some(x) => AccountId::assume_username_correct(x),
                 None => remote.get_token().await.expect("Failed to get token owner").user
             };
 
@@ -123,7 +123,7 @@ async fn main() {
                                 .unwrap();
                         }
                         else if account.is_bank() || player == account {
-                            let bank_gain = state.get_bal(&PlayerId::the_bank()).checked_sub(old_state.get_bal(&PlayerId::the_bank())).unwrap();
+                            let bank_gain = state.get_bal(&AccountId::the_bank()).checked_sub(old_state.get_bal(&AccountId::the_bank())).unwrap();
                             (
                                 if account.is_bank() {
                                     &mut revenue
@@ -142,7 +142,7 @@ async fn main() {
                         if !all && !account.is_bank() && player != account {
                             continue;
                         }
-                        let bank_gain = state.get_bal(&PlayerId::the_bank()).checked_sub(old_state.get_bal(&PlayerId::the_bank())).unwrap();
+                        let bank_gain = state.get_bal(&AccountId::the_bank()).checked_sub(old_state.get_bal(&AccountId::the_bank())).unwrap();
                         (
                             if account.is_bank() {
                                 &mut revenue
