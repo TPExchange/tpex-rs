@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::Coins;
 
-use super::{AssetId, Audit, Auditable, Error, PlayerId};
+use super::{AssetId, Audit, Auditable, Error, AccountId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingSync {
-    pub player: PlayerId,
-    pub assets: std::collections::HashMap<AssetId, u64>,
+    pub player: AccountId<'static>,
+    pub assets: hashbrown::HashMap<AssetId<'static>, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,12 +45,21 @@ impl TryFrom<WithdrawalSync> for WithdrawalTracker {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct PendingWithdrawal {
     pub id: u64,
-    pub player: PlayerId,
-    pub assets: std::collections::HashMap<AssetId, u64>
+    pub player: AccountId<'static>,
+    pub assets: hashbrown::HashMap<AssetId<'static>, u64>
 }
+// impl<'a> PendingWithdrawal<'a> {
+//     fn shallow_clone(&'a self) -> Self {
+//         Self {
+//             id: self.id,
+//             player: self.player.shallow_clone(),
+//             assets: self.assets.iter().map(|(k, v)| (k.shallow_clone(), *v)).collect()
+//         }
+//     }
+// }
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct WithdrawalTracker {
@@ -64,17 +73,16 @@ impl WithdrawalTracker {
         self.pending_withdrawals.clone()
     }
     /// Get a withdrawal
-    pub fn get_withdrawal(&self, id: u64) -> Result<PendingWithdrawal, Error> {
+    pub fn get_withdrawal(&self, id: u64) -> Result<&PendingWithdrawal, Error> {
         self.pending_withdrawals.get(&id)
-        .cloned()
         .ok_or(Error::InvalidId { id })
     }
     /// Get the next withdrawal that bankers should complete
-    pub fn get_next_withdrawal(&self) -> Option<PendingWithdrawal> {
-        self.pending_withdrawals.values().next().cloned()
+    pub fn get_next_withdrawal(&self) -> Option<&PendingWithdrawal> {
+        self.pending_withdrawals.values().next()
     }
-    pub fn track(&mut self, id: u64, player: PlayerId, assets: std::collections::HashMap<AssetId, u64>)  {
-        self.pending_withdrawals.insert(id, PendingWithdrawal{ id, player, assets: assets.clone() });
+    pub fn track(&mut self, id: u64, player: AccountId, assets: hashbrown::HashMap<AssetId<'static>, u64>)  {
+        self.pending_withdrawals.insert(id, PendingWithdrawal{ id, player: player.into_owned(), assets: assets.clone() });
         self.current_audit += Audit{coins: Coins::default(), assets};
     }
     /// Stops tracking the withdrawal, either for a completion or a cancel
