@@ -1,6 +1,8 @@
-use std::{collections::HashMap, pin::pin};
+use std::pin::pin;
 
-use tpex::Action;
+use hashbrown::HashMap;
+
+use tpex::{ids::HashMapCowExt, Action};
 
 use super::{PriceSummary, tokens};
 
@@ -45,7 +47,7 @@ pub(crate) struct TPExState<Stream: tokio::io::AsyncWrite> {
     state: tpex::State,
     file: Stream,
     cache: Vec<String>,
-    price_history: HashMap<tpex::AssetId, Vec<PriceSummary>>
+    price_history: HashMap<tpex::AssetId<'static>, Vec<PriceSummary>>
 }
 impl<Stream: tokio::io::AsyncSeek + tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + tokio::io::AsyncBufRead> TPExState<Stream> {
     pub async fn replay(file: Stream) -> Result<Self, tpex::Error> {
@@ -73,7 +75,7 @@ impl<Stream: tokio::io::AsyncWrite + Unpin> TPExState<Stream> {
         TPExState { state: tpex::State::new(), file, cache, price_history: Default::default() }
     }
 
-    pub async fn apply(&mut self, action: Action, time: chrono::DateTime<chrono::Utc>) -> Result<u64, tpex::Error> {
+    pub async fn apply<'a>(&mut self, action: Action<'a>, time: chrono::DateTime<chrono::Utc>) -> Result<u64, tpex::Error> {
         // Grab the information to price history before we consume the action and modify everything
         let maybe_asset = match &action {
             tpex::Action::BuyOrder { asset, .. } => Some(asset.clone()),
@@ -94,7 +96,7 @@ impl<Stream: tokio::io::AsyncWrite + Unpin> TPExState<Stream> {
                 best_sell: new_sell.keys().next().cloned(),
                 n_sell: new_sell.values().sum()
             };
-            let target = self.price_history.entry(asset).or_default();
+            let target = self.price_history.cow_get_or_default(asset).1;
             target.push(new_elem);
         }
         self.cache.push(String::from_utf8(stream.extract()).expect("Produced non-utf8 log line"));
