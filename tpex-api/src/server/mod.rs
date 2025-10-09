@@ -53,9 +53,9 @@ impl axum::response::IntoResponse for Error {
 
 async fn state_patch(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    token: TokenInfo,
+    token: TokenInfo<'_>,
     axum_extra::extract::OptionalQuery(args): axum_extra::extract::OptionalQuery<StatePatchArgs>,
-    axum::extract::Json(action): axum::extract::Json<tpex::Action>
+    axum::extract::Json(action): axum::extract::Json<tpex::Action<'_>>
 ) -> Result<axum::response::Json<u64>, Error> {
     match token.level {
         TokenLevel::ReadOnly => return Err(Error::TokenTooLowLevel),

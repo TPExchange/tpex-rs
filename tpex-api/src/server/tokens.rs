@@ -9,7 +9,7 @@ use crate::shared::*;
 
 use super::state::StateStruct;
 
-impl<T: AsyncBufRead + AsyncWrite + AsyncSeek + Unpin + Send + Sync> axum::extract::FromRequestParts<Arc<StateStruct<T>>> for TokenInfo {
+impl<T: AsyncBufRead + AsyncWrite + AsyncSeek + Unpin + Send + Sync> axum::extract::FromRequestParts<Arc<StateStruct<T>>> for TokenInfo<'_> {
     type Rejection = StatusCode;
 
     async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &Arc<StateStruct<T>>) -> Result<Self, Self::Rejection> {
@@ -46,19 +46,19 @@ impl TokenHandler {
 
         Ok(ret)
     }
-    pub async fn create_token(&self, level: TokenLevel, user: AccountId) -> sqlx::Result<Token> {
+    pub async fn create_token(&self, level: TokenLevel, user: AccountId<'_>) -> sqlx::Result<Token> {
         let token = Token::generate();
 
         let slice = token.0.as_slice();
         let level = level as i64;
-        let user = user.get_raw_name();
+        let user = user.as_ref();
 
         sqlx::query!(r#"INSERT INTO tokens(token, level, user) VALUES (?, ?, ?)"#, slice, level, user)
         .execute(&self.pool).await?;
 
         Ok(token)
     }
-    pub async fn get_token(&self, token: &Token) -> sqlx::Result<TokenInfo> {
+    pub async fn get_token(&self, token: &Token) -> sqlx::Result<TokenInfo<'static>> {
         let slice = token.0.as_slice();
         let query =
             sqlx::query!(r#"SELECT token as "token: Vec<u8>", level, user FROM tokens WHERE token = ?"#, slice)
@@ -67,7 +67,7 @@ impl TokenHandler {
         Ok(TokenInfo {
             token: Token(query.token.try_into().expect("Mismatched token length")),
             #[allow(deprecated)]
-            user: tpex::AccountId::assume_username_correct(query.user),
+            user: query.user.try_into().expect("Invalid user name in database"),
             level: TokenLevel::from_i64(query.level).expect("Invalid token level")
         })
     }

@@ -103,17 +103,17 @@ impl<'de> Deserialize<'de> for Token {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct TokenInfo {
+pub struct TokenInfo<'a> {
     pub token: Token,
-    pub user: AccountId,
+    pub user: AccountId<'a>,
     pub level: TokenLevel
 }
 
 #[derive(Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct TokenPostArgs {
+pub struct TokenPostArgs<'a> {
     pub level: TokenLevel,
-    pub user: AccountId
+    pub user: AccountId<'a>
 }
 
 #[derive(Default, Debug, Clone)]
@@ -138,15 +138,19 @@ pub struct StatePatchArgs {
 pub struct ErrorInfo {
     pub error: String
 }
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct InspectBalanceGetArgs {
-    pub player: AccountId
+pub struct InspectBalanceGetArgs<'a> {
+    pub player: AccountId<'a>
 }
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct InspectAssetsGetArgs {
-    pub player: AccountId
+pub struct InspectAssetsGetArgs<'a> {
+    pub player: AccountId<'a>
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceHistoryArgs<'a> {
+    pub asset: tpex::AssetId<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -190,9 +194,4 @@ impl PriceSummary {
     pub fn same_prices_as(&self, other: &PriceSummary) -> bool {
         self.best_buy == other.best_buy && self.n_buy == other.n_buy && self.best_sell == other.best_sell && self.n_sell == other.n_sell
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PriceHistoryArgs {
-    pub asset: tpex::AssetId,
 }

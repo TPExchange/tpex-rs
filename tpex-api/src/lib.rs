@@ -84,7 +84,7 @@ impl Remote {
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.text().await?)
     }
-    pub async fn stream_state(&self, from: u64) -> Result<impl futures::Stream<Item=Result<tpex::WrappedAction>> + use<>> {
+    pub async fn stream_state(&self, from: u64) -> Result<impl futures::Stream<Item=Result<tpex::WrappedAction<'static>>> + use<>> {
         let mut target = self.endpoint.clone();
         target.query_pairs_mut().append_pair("from", &from.to_string());
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
@@ -109,7 +109,7 @@ impl Remote {
             }
         }}))
     }
-    pub async fn apply(&self, action: &tpex::Action) -> Result<u64> {
+    pub async fn apply(&self, action: &tpex::Action<'_>) -> Result<u64> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /state").push("state");
 
@@ -121,7 +121,7 @@ impl Remote {
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
-    pub async fn create_token(&self, args: &TokenPostArgs) -> Result<Token> {
+    pub async fn create_token(&self, args: &TokenPostArgs<'_>) -> Result<Token> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
@@ -163,17 +163,17 @@ impl Remote {
             }
         }}))
     }
-    pub async fn get_balance(&self, player: &tpex::AccountId) -> Result<tpex::Coins> {
+    pub async fn get_balance(&self, player: &tpex::AccountId<'_>) -> Result<tpex::Coins> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /inspect/balance").push("inspect").push("balance");
-        target.query_pairs_mut().append_pair("player", player.get_raw_name());
+        target.query_pairs_mut().append_pair("player", player.as_ref());
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
-    pub async fn get_assets(&self, player: &tpex::AccountId) -> Result<std::collections::HashMap<AssetId, u64>> {
+    pub async fn get_assets(&self, player: &tpex::AccountId<'_>) -> Result<std::collections::HashMap<AssetId, u64>> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /inspect/assets").push("inspect").push("assets");
-        target.query_pairs_mut().append_pair("player", player.get_raw_name());
+        target.query_pairs_mut().append_pair("player", player.as_ref());
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
@@ -183,7 +183,7 @@ impl Remote {
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
-    pub async fn price_history(&self, asset: &AssetId) -> Result<Vec<PriceSummary>> {
+    pub async fn price_history(&self, asset: &AssetId<'_>) -> Result<Vec<PriceSummary>> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /price/history").push("price").push("history");
         target.query_pairs_mut().append_pair("asset", asset);
@@ -219,13 +219,13 @@ impl Mirrored {
     pub async fn unsynced(&'_ self) -> tokio::sync::RwLockReadGuard<'_, State> {
         self.state.read().await
     }
-    pub async fn apply(&self, action: tpex::Action) -> Result<u64> {
+    pub async fn apply(&self, action: tpex::Action<'_>) -> Result<u64> {
         // The remote could be desynced, so we send our update
         let id = self.remote.apply(&action).await?;
         drop(self.sync().await);
         Ok(id)
     }
-    pub async fn stream(self: std::sync::Arc<Self>) -> Result<impl futures::Stream<Item=Result<(std::sync::Arc<Self>, tpex::WrappedAction)>>> {
+    pub async fn stream(self: std::sync::Arc<Self>) -> Result<impl futures::Stream<Item=Result<(std::sync::Arc<Self>, tpex::WrappedAction<'static>)>>> {
         let next_id = self.state.read().await.get_next_id();
         let this: std::sync::Arc<Self> = self.clone();
         let stream = self.remote.stream_state(next_id).await?;
