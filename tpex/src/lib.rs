@@ -250,11 +250,11 @@ impl<'a> Action<'a> {
     fn adjust_audit(&self, mut audit: Audit) -> Option<Audit> {
         match self {
             Action::Deposit { asset, count, .. } => {
-                audit.add_asset(asset.clone(), *count);
+                audit.add_asset(asset.shallow_clone(), *count);
                 Some(audit)
             },
             Action::Undeposit { asset, count, .. } => {
-                audit.sub_asset(asset.clone(), *count);
+                audit.sub_asset(asset, *count);
                 Some(audit)
             }
             Action::CompleteWithdrawal{..} => {
@@ -264,7 +264,7 @@ impl<'a> Action<'a> {
                 None
             },
             Action::BuyCoins { n_diamonds, .. } => {
-                audit.sub_asset(AssetId::DIAMOND, *n_diamonds);
+                audit.sub_asset(&AssetId::DIAMOND, *n_diamonds);
                 audit.add_coins(DIAMOND_RAW_COINS.checked_mul(*n_diamonds).unwrap());
                 Some(audit)
             },
@@ -278,7 +278,7 @@ impl<'a> Action<'a> {
                 Some(audit)
             },
             Action::Remove { product, count } => {
-                audit.sub_asset(product.into(), *count);
+                audit.sub_asset(&product.into(), *count);
                 Some(audit)
             },
             Action::Propose { action, .. } => {
@@ -307,7 +307,7 @@ impl Audit {
             *entry = entry.checked_add(count).expect("Failed to add asset to audit");
         }
     }
-    pub fn sub_asset(&mut self, asset: AssetId, count: u64) {
+    pub fn sub_asset(&mut self, asset: &AssetId, count: u64) {
         if count == 0 {
             return;
         }
