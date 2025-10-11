@@ -1,4 +1,4 @@
-use std::{borrow::{Borrow, Cow}, fmt::{Debug, Display}, hash::{BuildHasher, Hash, Hasher}, ops::{Deref, Div, DivAssign}};
+use std::{borrow::{Borrow, Cow}, fmt::{Debug, Display}, hash::{BuildHasher, Hash, Hasher}, ops::{Deref, Div, DivAssign}, str::FromStr};
 
 use const_format::concatcp;
 use serde::{Deserialize, Serialize};
@@ -6,19 +6,45 @@ use serde::de::Error;
 
 use crate::{is_safe_name, ETP_DELIM, SHARED_ACCOUNT_DELIM};
 
+#[derive(Debug, Clone)]
+pub struct IdParseError<'a>(pub Cow<'a, str>);
+impl<'a> From<Cow<'a, str>> for IdParseError<'a> {
+    fn from(value: Cow<'a, str>) -> Self {
+        Self(value)
+    }
+}
+impl<'a> From<IdParseError<'a>> for Cow<'a, str> {
+    fn from(value: IdParseError<'a>) -> Self {
+        value.0
+    }
+}
+impl<'a> Deref for IdParseError<'a> {
+    type Target = Cow<'a, str>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl Display for IdParseError<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to parse the following as an ID {:?}", self.0)
+    }
+}
+impl std::error::Error for IdParseError<'_> {}
+
 pub trait HashMapCowExt<'this, Search, K, V> {
     fn cow_get_or_default(&'this mut self, key: Search) -> (&'this mut K, &'this mut V);//hashbrown::hash_map::RawEntryMut<'a, K, V, S>;
 }
 macro_rules! common_impl {
     ($type:ident)  => {
-        impl TryFrom<String> for $type<'static> {
-            type Error = Cow<'static, str>;
+        impl<'a> TryFrom<String> for $type<'a> {
+            type Error = IdParseError<'a>;
             fn try_from(value: String) -> Result<Self, Self::Error> {
                 Self::try_from(Cow::from(value))
             }
         }
         impl<'a> TryFrom<&'a str> for $type<'a> {
-            type Error = Cow<'a, str>;
+            type Error = IdParseError<'a>;
             fn try_from(value: &'a str) -> Result<Self, Self::Error> {
                 Self::try_from(Cow::from(value))
             }
@@ -74,6 +100,13 @@ macro_rules! common_impl {
         impl<'this, 'key, V: Default, S: BuildHasher> HashMapCowExt<'this, $type<'_>, $type<'key>, V> for hashbrown::HashMap<$type<'key>, V, S> {
             fn cow_get_or_default(&mut self, search: $type<'_>) -> (&mut $type<'key>, &mut V) {
                 self.raw_entry_mut().from_key(search.as_ref()).or_insert_with(move || (search.into_owned(), Default::default()))
+            }
+        }
+        // We don't get to pick the lifetime, so we have to clone
+        impl<'a> FromStr for $type<'a> {
+            type Err = IdParseError<'a>;
+            fn from_str(x: &str) -> Result<Self, Self::Err> {
+                x.to_owned().try_into()
             }
         }
         // impl<'a, 'b> Equivalent<$type<'b>> for Find<$type<'a>> {
@@ -140,10 +173,10 @@ impl<'a> Deref for AccountId<'a> {
     }
 }
 impl<'a> TryFrom<Cow<'a, str>> for AccountId<'a> {
-    type Error = Cow<'a, str>;
+    type Error = IdParseError<'a>;
     fn try_from(value: Cow<'a, str>) -> Result<Self, Self::Error> {
-        SharedId::try_from(value).map(AccountId::from)
-        .or_else(|i| UnsharedId::try_from(i).map(AccountId::from))
+        value.try_into().map(Self::Shared)
+        .or_else(|IdParseError(i)| i.try_into().map(Self::Unshared))
     }
 }
 common_impl!(AccountId);
@@ -201,14 +234,14 @@ impl<'a> UnsharedId<'a> {
     pub fn shallow_clone(&'a self) -> Self { Self(Cow::Borrowed(&self.0)) }
 }
 impl<'a> TryFrom<Cow<'a, str>> for UnsharedId<'a> {
-    type Error = Cow<'a, str>;
+    type Error = IdParseError<'a>;
 
     fn try_from(value: Cow<'a, str>) -> Result<Self, Self::Error> {
         if is_safe_name(value.as_ref()) {
             Ok(Self(value))
         }
         else {
-            Err(value)
+            Err(value.into())
         }
     }
 }
@@ -333,11 +366,11 @@ impl<'a, 'b> Div<UnsharedId<'a>> for SharedId<'b> {
     }
 }
 impl<'a> TryFrom<Cow<'a, str>> for SharedId<'a> {
-    type Error = Cow<'a, str>;
+    type Error = IdParseError<'a>;
 
     fn try_from(value: Cow<'a, str>) -> Result<Self, Self::Error> {
         if !value.starts_with(SHARED_ACCOUNT_DELIM) {
-            return Err(value);
+            return Err(value.into());
         }
         let ret = Self(value);
         // It's the bank!
@@ -345,7 +378,7 @@ impl<'a> TryFrom<Cow<'a, str>> for SharedId<'a> {
             return Ok(Self::THE_BANK);
         }
         if !ret.parts().all(is_safe_name) {
-            return Err(ret.0);
+            return Err(ret.0.into());
         }
         Ok(ret)
     }
@@ -393,10 +426,10 @@ impl<'a> Deref for AssetId<'a> {
     }
 }
 impl<'a> TryFrom<Cow<'a, str>> for AssetId<'a> {
-    type Error = Cow<'a, str>;
+    type Error = IdParseError<'a>;
     fn try_from(value: Cow<'a, str>) -> Result<Self, Self::Error> {
-        ETPId::try_from(value).map(Self::from)
-        .or_else(|i| ItemId::try_from(i).map(Self::from))
+        value.try_into().map(Self::ETP)
+        .or_else(|IdParseError(i)| i.try_into().map(Self::Item))
     }
 }
 common_impl!(AssetId);
@@ -462,14 +495,14 @@ impl<'a> Deref for ItemId<'a> {
     }
 }
 impl<'a> TryFrom<Cow<'a, str>> for ItemId<'a> {
-    type Error = Cow<'a, str>;
+    type Error = IdParseError<'a>;
 
     fn try_from(value: Cow<'a, str>) -> Result<Self, Self::Error> {
         if is_safe_name(value.as_ref()) {
             Ok(Self(value))
         }
         else {
-            Err(value)
+            Err(value.into())
         }
     }
 }
@@ -526,16 +559,16 @@ impl<'a> Deref for ETPId<'a> {
     }
 }
 impl<'a> TryFrom<Cow<'a, str>> for ETPId<'a> {
-    type Error = Cow<'a, str>;
+    type Error = IdParseError<'a>;
 
     fn try_from(base: Cow<'a, str>) -> Result<Self, Self::Error> {
         if !base.starts_with(SHARED_ACCOUNT_DELIM) {
-            return Err(base);
+            return Err(base.into());
         }
-        let Some(split_offset) = base.find(ETP_DELIM) else { return Err(base) };
+        let Some(split_offset) = base.find(ETP_DELIM) else { return Err(base.into()) };
         // Validate the components
         if SharedId::try_from(Cow::Borrowed(&base[..split_offset])).is_err() || ItemId::try_from(Cow::Borrowed(&base[split_offset + 1 ..])).is_err() {
-            return Err(base);
+            return Err(base.into());
         }
         Ok(ETPId { base, split_offset })
     }

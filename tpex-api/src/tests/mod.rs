@@ -9,7 +9,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{server::{self, tokens::TokenHandler}, Mirrored, PriceSummary, Remote, Token, TokenLevel};
 
-fn player(n: u64) -> AccountId { AccountId::assume_username_correct(n.to_string()) }
+fn player(n: u64) -> AccountId<'static> { n.to_string().try_into().unwrap() }
 
 struct RunningServer {
     cancel: DropGuard,
@@ -78,10 +78,10 @@ async fn deposit() {
     let server = RunningServer::start_server().await;
     let client = Remote::new(server.url.clone(), server.token);
     let deposit_action = tpex::Action::Deposit {
-        player: AccountId::assume_username_correct("test".to_owned()),
-        asset: AssetId::from("cobblestone"),
+        player: AccountId::try_from("test").unwrap(),
+        asset: AssetId::try_from("cobblestone").unwrap(),
         count: 64,
-        banker: AccountId::the_bank()
+        banker: AccountId::THE_BANK
     };
     client.apply(&deposit_action).await.expect("Failed to apply deposit");
     // This will be a single action, so we can treat it as a single wrapped action
@@ -105,28 +105,28 @@ async fn stream_state() {
     let stream = client.stream_state(1).await.expect("Stream failed");
     let actions = vec![
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 1,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 2,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 3,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 4,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
     ];
     let actions_copy = actions.clone();
@@ -156,28 +156,28 @@ async fn mirrored_stream_state() {
     let stream = client.stream().await.expect("Stream failed");
     let actions = vec![
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 1,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 2,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 3,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 4,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
     ];
     for i in actions.clone() {
@@ -205,22 +205,22 @@ async fn stream_fastsync() {
     let stream = client.stream_fastsync().await.expect("FastSync failed");
     let actions = vec![
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 1,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 2,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
         tpex::Action::Deposit {
-            player: AccountId::assume_username_correct("test".to_owned()),
-            asset: AssetId::from("cobblestone"),
+            player: AccountId::try_from("test").unwrap(),
+            asset: AssetId::try_from("cobblestone").unwrap(),
             count: 3,
-            banker: AccountId::the_bank()
+            banker: AccountId::THE_BANK
         },
     ];
     let actions_copy = actions.clone();
@@ -240,7 +240,7 @@ async fn stream_fastsync() {
             panic!("Too many loops");
         }
     };
-    assert_eq!(wrapped.balance.assets[&AccountId::assume_username_correct("test".to_owned())][&AssetId::from("cobblestone")], 6);
+    assert_eq!(wrapped.balance.assets[&AccountId::try_from("test").unwrap()][&AssetId::try_from("cobblestone").unwrap()], 6);
 }
 
 // After nasty bug that caused reloads to not have newlines
@@ -249,9 +249,9 @@ async fn reload_state() {
     let server1 = RunningServer::start_server().await;
     let client1 = Remote::new(server1.url, server1.token);
     for i in [
-        tpex::Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 1, banker: AccountId::the_bank() },
-        tpex::Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 2, banker: AccountId::the_bank() },
-        tpex::Action::Deposit { player: player(1), asset: "cobblestone".into(), count: 3, banker: AccountId::the_bank() },
+        tpex::Action::Deposit { player: player(1), asset: "cobblestone".try_into().unwrap(), count: 1, banker: AccountId::THE_BANK },
+        tpex::Action::Deposit { player: player(1), asset: "cobblestone".try_into().unwrap(), count: 2, banker: AccountId::THE_BANK },
+        tpex::Action::Deposit { player: player(1), asset: "cobblestone".try_into().unwrap(), count: 3, banker: AccountId::THE_BANK },
     ] { client1.apply(&i).await.expect("Failed to apply action"); }
     let state1 = client1.get_state(0).await.expect("Could not get initial state");
     let server2 = RunningServer::start_server_with_log(state1.clone()).await;
@@ -268,10 +268,10 @@ async fn test_inspect() {
     // Disable fees
     client.apply(&tpex::Action::UpdateBankRates { rates: tpex::BankRates::free() }).await.unwrap();
     // Deposit diamonds
-    client.apply(&tpex::Action::Deposit { player: player(1), asset: tpex::DIAMOND_NAME.into(), count: 64, banker: AccountId::the_bank() }).await.unwrap();
+    client.apply(&tpex::Action::Deposit { player: player(1), asset: tpex::AssetId::DIAMOND, count: 64, banker: AccountId::THE_BANK }).await.unwrap();
     // No autoconversion
     assert_eq!(client.get_balance(&player(1)).await.expect("Failed to get balance"), tpex::Coins::default());
-    assert_eq!(client.get_assets(&player(1)).await.expect("Failed to get assets"), [(tpex::DIAMOND_NAME.into(), 64)].into());
+    assert_eq!(client.get_assets(&player(1)).await.expect("Failed to get assets"), [(tpex::AssetId::DIAMOND, 64)].into());
     // Non-existent account should be empty
     assert_eq!(client.get_balance(&player(2)).await.expect("Failed to get balance"), tpex::Coins::default());
     assert_eq!(client.get_assets(&player(2)).await.expect("Failed to get assets"), Default::default());
@@ -279,7 +279,7 @@ async fn test_inspect() {
     client.apply(&tpex::Action::BuyCoins { player: player(1), n_diamonds: 32 }).await.unwrap();
     // Should be split now
     assert_eq!(client.get_balance(&player(1)).await.expect("Failed to get balance"), tpex::Coins::from_coins(32_000));
-    assert_eq!(client.get_assets(&player(1)).await.expect("Failed to get assets"), [(tpex::DIAMOND_NAME.into(), 32)].into());
+    assert_eq!(client.get_assets(&player(1)).await.expect("Failed to get assets"), [(tpex::AssetId::DIAMOND, 32)].into());
     // Non-existent account should be empty
     assert_eq!(client.get_balance(&player(2)).await.expect("Failed to get balance"), tpex::Coins::default());
     assert_eq!(client.get_assets(&player(2)).await.expect("Failed to get assets"), Default::default());
@@ -295,39 +295,39 @@ async fn test_price_history() {
     let client = Remote::new(server.url, server.token);
     client.apply(&tpex::Action::Deposit {
         player: player(1),
-        asset: tpex::DIAMOND_NAME.into(),
+        asset: tpex::AssetId::DIAMOND,
         count: 100,
-        banker: tpex::AccountId::the_bank()
+        banker: tpex::AccountId::THE_BANK
     }).await.expect("Failed to deposit diamonds");
     client.apply(&tpex::Action::BuyCoins {
         player: player(1),
         n_diamonds: 100,
     }).await.expect("Failed to buy coins");
-    let asset = "cobblestone".to_owned();
-    let not_asset = "stone".to_owned();
+    let asset = AssetId::try_from("cobblestone").unwrap();
+    let not_asset =  AssetId::try_from("stone").unwrap();
     assert!(client.price_history(&asset).await.expect("Could not get price history").is_empty(), "Price history changed after deposit");
     client.apply(&tpex::Action::Deposit {
         player: player(1),
-        asset: asset.clone(),
+        asset: asset.shallow_clone(),
         count: 100,
-        banker: tpex::AccountId::the_bank()
+        banker: tpex::AccountId::THE_BANK
     }).await.expect("Failed to deposit cobblestone");
     client.apply(&tpex::Action::Deposit {
         player: player(1),
-        asset: not_asset.clone(),
+        asset: not_asset.shallow_clone(),
         count: 100,
-        banker: tpex::AccountId::the_bank()
+        banker: tpex::AccountId::THE_BANK
     }).await.expect("Failed to deposit stone");
     assert!(client.price_history(&asset).await.expect("Could not get price history").is_empty(), "Price history changed after deposit");
     client.apply(&tpex::Action::BuyOrder {
         player: player(1),
-        asset: not_asset.clone(),
+        asset: not_asset.shallow_clone(),
         count: 1,
         coins_per: tpex::Coins::from_coins(1)
     }).await.expect("Failed to buy order stone");
     client.apply(&tpex::Action::SellOrder {
         player: player(1),
-        asset: not_asset.clone(),
+        asset: not_asset.shallow_clone(),
         count: 1,
         coins_per: tpex::Coins::from_coins(2)
     }).await.expect("Failed to sell order stone");
@@ -336,39 +336,39 @@ async fn test_price_history() {
     // Initial prices
     client.apply(&tpex::Action::BuyOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: asset.shallow_clone(),
         count: 3,
         coins_per: tpex::Coins::from_coins(2)
     }).await.expect("Failed to buy order stone");
     client.apply(&tpex::Action::SellOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: asset.shallow_clone(),
         count: 7,
         coins_per: tpex::Coins::from_coins(5)
     }).await.expect("Failed to sell order stone");
     // Worse prices
     client.apply(&tpex::Action::BuyOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: asset.shallow_clone(),
         count: 11,
         coins_per: tpex::Coins::from_coins(1)
     }).await.expect("Failed to buy order stone");
     client.apply(&tpex::Action::SellOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: asset.shallow_clone(),
         count: 13,
         coins_per: tpex::Coins::from_coins(6)
     }).await.expect("Failed to sell order stone");
     // Better prices
     client.apply(&tpex::Action::BuyOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: asset.shallow_clone(),
         count: 1,
         coins_per: tpex::Coins::from_coins(3)
     }).await.expect("Failed to buy order stone");
     client.apply(&tpex::Action::SellOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: asset.shallow_clone(),
         count: 1,
         coins_per: tpex::Coins::from_coins(4)
     }).await.expect("Failed to sell order stone");
