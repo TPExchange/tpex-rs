@@ -827,11 +827,8 @@ impl State {
                     // Otherwise, this is definitely authorised, and we can continue
                 }
                 self.shared_account.add_proposal(id, target, *action)?;
-                // The player agrees to their own proposal.
-                if let Some(action) = self.shared_account.vote(id, proposer, true)? {
-                    // We then process it if it immediately passes
-                    self.apply_inner(id, action)?
-                }
+                // The player has to separately agree to their own proposal, otherwise we could get arbitrarily long chains of actions in a single action,
+                // which would violate the uniqueness assumption of the ids
                 Ok(())
 
             },

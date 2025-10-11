@@ -1076,8 +1076,8 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await;
-    // Propose (and immediately pass) transferring coins to player 3
-    state.assert_state(
+    // Propose transferring coins to player 3
+    let proposal = state.assert_state(
         Action::Propose {
             action: Box::new(Action::TransferCoins {
                 payer: shared_name.clone().into(),
@@ -1088,8 +1088,29 @@ async fn test_shared() {
             target: shared_name.clone(),
         },
         ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    // Accept transferring coins to player 3
+    state.assert_state(
+        Action::Agree {
+            player: player(1),
+            proposal_id: proposal,
+        },
+        ExpectedState {
             coins_appeared: vec![(player(3), Coins::from_coins(10))],
             coins_disappeared: vec![(shared_name.clone().into(), Coins::from_coins(10))],
+            ..Default::default()
+        }
+    ).await;
+    // Try to repeat accept transferring coins to player 3
+    state.assert_state(
+        Action::Agree {
+            player: player(1),
+            proposal_id: proposal,
+        },
+        ExpectedState {
+            should_fail: true,
             ..Default::default()
         }
     ).await;
@@ -1105,8 +1126,8 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await;
-    // Propose (and immediately pass) transferring coins to player 3 again
-    state.assert_state(
+    // Propose transferring coins to player 3 again
+    let proposal = state.assert_state(
         Action::Propose {
             action: Box::new(Action::TransferCoins {
                 payer: shared_name.clone().into(),
@@ -1115,6 +1136,16 @@ async fn test_shared() {
             }),
             proposer: player(1),
             target: shared_name.clone(),
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    // Accept transferring coins to player 3 again
+    state.assert_state(
+        Action::Agree {
+            player: player(1),
+            proposal_id: proposal,
         },
         ExpectedState {
             coins_appeared: vec![(player(3), Coins::from_coins(10))],
@@ -1149,6 +1180,16 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await.unwrap();
+    // Accept transferring coins to player 3 yet again
+    state.assert_state(
+        Action::Agree {
+            player: player(1),
+            proposal_id: proposal1,
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
     // Player 2 doesn't like this, but their vote hits the notice threshold
     state.assert_state(
         Action::Disagree {
@@ -1187,6 +1228,16 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await;
+    // Player 2 does not (testing out of order)
+    state.assert_state(
+        Action::Agree {
+            player: player(2),
+            proposal_id: proposal2
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
     assert_eq!(StateSync::from(&state.state).shared_account.proposals.into_iter().collect::<Vec<(u64, Proposal)>>(), Vec::<(u64, Proposal)>::new());
     // Player 1 tries to vote again
     state.assert_state(
@@ -1215,6 +1266,15 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await.unwrap();
+    state.assert_state(
+        Action::Agree {
+            player: player(1),
+            proposal_id: proposal3
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
     // Player 2 disagrees
     state.assert_state(
         Action::Disagree {
@@ -1263,6 +1323,15 @@ async fn test_shared() {
     ).await.unwrap();
     state.assert_state(
         Action::Agree {
+            player: player(1),
+            proposal_id: proposal4
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::Agree {
             player: player(2),
             proposal_id: proposal4
         },
@@ -1284,6 +1353,15 @@ async fn test_shared() {
             ..Default::default()
         }
     ).await.unwrap();
+        state.assert_state(
+        Action::Agree {
+            player: player(2),
+            proposal_id: proposal5
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await;
     state.assert_state(
         Action::Agree {
             player: player(1),
@@ -1316,6 +1394,15 @@ async fn test_shared() {
             proposal_id: proposal6
         },
         ExpectedState {
+            ..Default::default()
+        }
+    ).await;
+    state.assert_state(
+        Action::Agree {
+            player: player(2),
+            proposal_id: proposal6
+        },
+        ExpectedState {
             coins_appeared: vec![(shared_name.clone().into(), Coins::from_coins(1))],
             coins_disappeared: vec![(child_name.clone().into(), Coins::from_coins(1))],
             ..Default::default()
@@ -1324,13 +1411,22 @@ async fn test_shared() {
     let fs = StateSync::from(&state.state);
     assert_eq!(fs.shared_account.bank.children().keys().cloned().collect::<Vec<UnsharedId>>(), vec![UnsharedId::try_from("foo").unwrap()]);
     // The bank winds up the company
-    state.assert_state(
+    let proposal7 = state.assert_state(
         Action::Propose {
             action: Box::new(Action::WindUp {
                 account: shared_name.clone()
             }),
             proposer: AccountId::THE_BANK,
             target: SharedId::THE_BANK
+        },
+        ExpectedState {
+            ..Default::default()
+        }
+    ).await.unwrap();
+    state.assert_state(
+        Action::Agree {
+            player: AccountId::THE_BANK,
+            proposal_id: proposal7
         },
         ExpectedState {
             coins_appeared: vec![(AccountId::THE_BANK, Coins::from_coins(1970))],

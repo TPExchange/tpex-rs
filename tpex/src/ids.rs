@@ -116,37 +116,8 @@ macro_rules! common_impl {
                 x.to_owned().try_into()
             }
         }
-        // impl<'a, 'b> Equivalent<$type<'b>> for Find<$type<'a>> {
-        //     fn equivalent(&self, key: &$type<'b>) -> bool {
-        //         &self.0 == key
-        //     }
-        // }
     }
 }
-// impl<'a> PartialEq<UnsharedId<'a>> for AccountId<'a> {
-//     fn eq(&self, other: &UnsharedId<'a>) -> bool {
-//         match self {
-//             AccountId::Unshared(x) => x.eq(other),
-//             _ => false
-//         }
-//     }
-// }
-// impl<'a> PartialEq<SharedId<'a>> for AccountId<'a> {
-//     fn eq(&self, other: &SharedId<'a>) -> bool {
-//         match self {
-//             AccountId::Shared(x) => x.eq(other),
-//             _ => false
-//         }
-//     }
-// }
-
-// #[repr(transparent)]
-// pub struct Find<T: Hash>(pub T);
-// impl<T: Hash> Hash for Find<T> {
-//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-//         self.0.hash(state);
-//     }
-// }
 
 #[derive(Debug, Clone)]
 pub enum AccountId<'a> {

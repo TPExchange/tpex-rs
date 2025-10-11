@@ -12,6 +12,8 @@ enum Command {
     Mirror,
     /// Generate an audit of the current state
     Audit,
+    /// Check that the state is parsable and consistent
+    Verify,
     /// Create an atomically updated cache file of the FastSync data
     FastsyncCache {
         path: String
@@ -58,6 +60,13 @@ async fn main() {
                 println!("{asset}: {count}");
             }
         }
+        Command::Verify => {
+            let remote = tpex_api::Remote::new(args.endpoint.clone(), args.token);
+            let transactions = remote.get_state(0).await.expect("Failed to download state");
+            let mut state = tpex::State::new();
+            state.replay(&mut transactions.as_bytes(), true).await.expect("Failed to replay state");
+            println!("State replayed successfully");
+        },
         Command::Mirror => {
             let mut next_id = 1;
             let remote = tpex_api::Remote::new(args.endpoint.clone(), args.token);
