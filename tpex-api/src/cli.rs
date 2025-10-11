@@ -2,13 +2,16 @@ use std::{collections::HashMap, pin::pin};
 
 use clap::Parser;
 use futures::StreamExt;
-use tpex::{order::OrderType, AssetId, Coins, PlayerId, State, WrappedAction, DIAMOND_NAME};
+use num_traits::Euclid;
+use tpex::{order::OrderType, AssetId, Auditable, Coins, PlayerId, State, WrappedAction, DIAMOND_NAME, DIAMOND_RAW_COINS};
 use tpex_api::Token;
 
 #[derive(clap::Subcommand)]
 enum Command {
     /// Stream the state to stdout
     Mirror,
+    /// Generate an audit of the current state
+    Audit,
     /// Create an atomically updated cache file of the FastSync data
     FastsyncCache {
         path: String
@@ -39,6 +42,22 @@ struct Args {
 async fn main() {
     let args = Args::parse();
     match args.command {
+        Command::Audit => {
+            let remote = tpex_api::Remote::new(args.endpoint.clone(), args.token);
+            let fastsync = remote.fastsync().await.expect("Failed to download fastsync");
+            let mut audit = State::try_from(fastsync).expect("Failed to load fastsync").hard_audit();
+            // Convert coins to diamonds
+            let (coins_from_diamonds, hopefully_no_remainder) = audit.coins.millicoins().div_rem_euclid(&DIAMOND_RAW_COINS.millicoins());
+            assert_eq!(hopefully_no_remainder, 0, "Non-integer number of diamonds in bank");
+            *audit.assets.entry(DIAMOND_NAME.into()).or_default() += coins_from_diamonds;
+
+            let mut x = Vec::from_iter(audit.assets);
+            x.sort_by(|(a,_), (b, _)| a.cmp(b));
+
+            for (asset, count) in x {
+                println!("{asset}: {count}");
+            }
+        }
         Command::Mirror => {
             let mut next_id = 1;
             let remote = tpex_api::Remote::new(args.endpoint.clone(), args.token);
@@ -197,8 +216,8 @@ async fn main() {
                     tpex::Action::CreateOrUpdateShared { .. } |
                     tpex::Action::Deleted { .. } => (),
                     // Dunno what to do with these yet
-                    tpex::Action::TransferCoins { .. } => todo!(),
-                    tpex::Action::TransferAsset { .. } => todo!(),
+                    tpex::Action::TransferCoins { .. } => (),
+                    tpex::Action::TransferAsset { .. } => (),
                     tpex::Action::Propose { .. } => todo!(),
                     tpex::Action::Agree { .. } => todo!(),
                     tpex::Action::Disagree { .. } => todo!(),
