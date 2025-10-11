@@ -1,3 +1,10 @@
+//! The various Clone on Write ID types
+//!
+//! These use the type system to enforce correctness of IDs throughout the code, and prevent you mixing up different types of IDs
+//!
+//! Try to avoid using `.clone()` on these types, which defaults to a deep copy of the string.
+//! Instead, make your decision explicit with `deep_clone` or `shallow_clone`
+
 use std::{borrow::{Borrow, Cow}, fmt::{Debug, Display}, hash::{BuildHasher, Hash, Hasher}, ops::{Deref, Div, DivAssign}, str::FromStr};
 
 use const_format::concatcp;
@@ -141,7 +148,7 @@ macro_rules! common_impl {
 //     }
 // }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum AccountId<'a> {
     Unshared(UnsharedId<'a>),
     Shared(SharedId<'a>)
@@ -615,8 +622,8 @@ mod tests {
     #[test]
     fn fuzz_etp() {
         let shared_name: SharedId = ".foo".try_into().expect("Could not parse name");
-        assert_eq!(ETPId::create(shared_name.clone(), "foobar".try_into().unwrap()).deref(), ".foo:foobar");
-        assert_eq!(ETPId::try_from(".foo:foobar").unwrap(), ETPId::create(shared_name.clone(), "foobar".try_into().unwrap()));
+        assert_eq!(ETPId::create(shared_name.shallow_clone(), "foobar".try_into().unwrap()).deref(), ".foo:foobar");
+        assert_eq!(ETPId::try_from(".foo:foobar").unwrap(), ETPId::create(shared_name.shallow_clone(), "foobar".try_into().unwrap()));
         assert_eq!(ETPId::try_from(".foo:foobar").unwrap().deref(), ".foo:foobar");
         assert_eq!(ETPId::create(SharedId::THE_BANK, "foobar".try_into().unwrap()).deref(), ".:foobar");
         assert_eq!(ETPId::try_from(".:foobar").unwrap(), ETPId::create(SharedId::THE_BANK, "foobar".try_into().unwrap()));

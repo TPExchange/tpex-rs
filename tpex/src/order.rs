@@ -38,7 +38,7 @@ impl TryInto<OrderTracker> for OrderSync {
                         coins_per,
                         player: i.player,
                         amount_remaining: i.amount_remaining,
-                        asset: asset.clone(),
+                        asset: asset.deep_clone(),
                         order_type: OrderType::Buy,
                         fee_ppm: i.fee_ppm,
                     }).is_some() { return Err(Error::InvalidFastSync); }
@@ -55,7 +55,7 @@ impl TryInto<OrderTracker> for OrderSync {
         }
 
         for (asset, levels) in self.sell_orders {
-            let entry = best_sell.entry(asset.clone()).or_default();
+            let entry = best_sell.cow_get_or_default(asset.shallow_clone()).1;
             for (coins_per, pending) in levels {
                 let mut data = std::collections::VecDeque::with_capacity(pending.len());
 
@@ -67,12 +67,12 @@ impl TryInto<OrderTracker> for OrderSync {
                         coins_per,
                         player: i.player,
                         amount_remaining: i.amount_remaining,
-                        asset: asset.clone(),
+                        asset: asset.deep_clone(),
                         order_type: OrderType::Sell,
                         fee_ppm: i.fee_ppm,
                     }).is_some() { return Err(Error::InvalidFastSync); }
                     // Sell orders lock up items
-                    current_audit.add_asset(asset.clone(), i.amount_remaining);
+                    current_audit.add_asset(asset.shallow_clone(), i.amount_remaining);
                 }
                 if entry.insert(coins_per, data).is_some() {
                     return Err(Error::InvalidFastSync);
@@ -94,10 +94,10 @@ impl From<&OrderTracker> for OrderSync {
             buy_orders:
                 val.best_buy.iter()
                 .map(|(asset, levels)| {
-                    (asset.clone(), levels.iter().map(|(coins_per, pending)| {
+                    (asset.deep_clone(), levels.iter().map(|(coins_per, pending)| {
                         (*coins_per, pending.iter().filter_map(|i| val.orders.get(i)).map(|i| PendingSync {
                             id: i.id,
-                            player: i.player.clone(),
+                            player: i.player.deep_clone(),
                             amount_remaining: i.amount_remaining,
                             fee_ppm: i.fee_ppm,
                         }).collect())
@@ -106,10 +106,10 @@ impl From<&OrderTracker> for OrderSync {
             sell_orders:
                 val.best_sell.iter()
                 .map(|(asset, levels)| {
-                    (asset.clone(), levels.iter().map(|(coins_per, pending)| {
+                    (asset.deep_clone(), levels.iter().map(|(coins_per, pending)| {
                         (*coins_per, pending.iter().filter_map(|i| val.orders.get(i)).map(|i| PendingSync {
                             id: i.id,
-                            player: i.player.clone(),
+                            player: i.player.deep_clone(),
                             amount_remaining: i.amount_remaining,
                             fee_ppm: i.fee_ppm,
                         }).collect())
@@ -363,7 +363,7 @@ impl OrderTracker {
             ret.cost.checked_add_assign(remaining_cost).expect("Add remaining cost overflow");
         }
         // We are no longer responsible for the bought items
-        self.current_audit.sub_asset(asset.clone(), ret.assets_instant_matched);
+        self.current_audit.sub_asset(asset, ret.assets_instant_matched);
 
         ret
     }
@@ -385,7 +385,7 @@ impl OrderTracker {
             let order = {
                 if match_res.order_remaining == 0 {
                     // Check to see this wasn't a canceled order
-                    if let Some(order_val) = self.remove_best(asset.clone(), OrderType::Buy) {
+                    if let Some(order_val) = self.remove_best(asset.shallow_clone(), OrderType::Buy) {
                         order_val
                     }
                     else { continue; }
@@ -426,7 +426,7 @@ impl OrderTracker {
         }
 
         // We are responsible for the remaining listed items
-        self.current_audit.add_asset(asset.clone(), amount_remaining);
+        self.current_audit.add_asset(asset.shallow_clone(), amount_remaining);
 
         ret
     }
@@ -461,7 +461,7 @@ impl OrderTracker {
                 // If we found it as a sell...
                 OrderType::Sell => {
                     // ... we are no longer responsible for the refunded assets ...
-                    self.current_audit.sub_asset(found.asset.clone(), found.amount_remaining);
+                    self.current_audit.sub_asset(&found.asset, found.amount_remaining);
                     // ... remove it from the order list ...
                     {
                         let levels = self.best_sell.get_mut(&found.asset).expect("Failed to find asset in cancel sell");
@@ -501,7 +501,7 @@ impl Auditable for OrderTracker {
                     new_audit.add_coins(cost);
                 },
                 // A buy order has taken assets from someone's account
-                OrderType::Sell => new_audit.add_asset(order.asset.clone(), order.amount_remaining),
+                OrderType::Sell => new_audit.add_asset(order.asset.shallow_clone(), order.amount_remaining),
             }
         }
         if new_audit != self.current_audit {

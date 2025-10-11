@@ -23,7 +23,7 @@ impl TryFrom<BalanceSync> for BalanceTracker {
             assets: value.assets.values()
                 .try_fold(hashbrown::HashMap::default(), |mut acc, assets| {
                     for (asset_name, asset_count) in assets {
-                        let tgt: &mut u64 = acc.entry(asset_name.clone()).or_default();
+                        let tgt: &mut u64 = acc.cow_get_or_default(asset_name.shallow_clone()).1;
                         *tgt = tgt.checked_add(*asset_count).ok_or(Error::InvalidFastSync)?;
                     }
                     Ok(acc)
@@ -98,7 +98,7 @@ impl BalanceTracker {
                 self.assets.remove(player.as_ref());
             }
         }
-        self.current_audit.sub_asset(asset.clone(), count);
+        self.current_audit.sub_asset(&asset, count);
         Ok(())
     }
     #[allow(dead_code)]
@@ -160,7 +160,7 @@ impl Auditable for BalanceTracker {
         let mut recalced_assets: hashbrown::HashMap<AssetId, u64> = hashbrown::HashMap::new();
         for  player_assets in self.assets.values() {
             for (asset, count) in player_assets {
-                *recalced_assets.entry(asset.clone()).or_default() += count;
+                *recalced_assets.cow_get_or_default(asset.shallow_clone()).1 += count;
             }
         }
         if self.current_audit.assets != recalced_assets {

@@ -92,7 +92,7 @@ impl WithdrawalTracker {
         else { return Err(Error::InvalidId{id}); };
         // We no longer have the items
         for (asset, count) in res.assets.iter() {
-            self.current_audit.sub_asset(asset.clone(), *count);
+            self.current_audit.sub_asset(asset, *count);
         }
         Ok(res)
     }
@@ -104,7 +104,7 @@ impl Auditable for WithdrawalTracker {
         let mut new_audit = Audit::default();
         for withdrawal in self.pending_withdrawals.values() {
             for (asset, count) in &withdrawal.assets {
-                new_audit.add_asset(asset.clone(), *count);
+                new_audit.add_asset(asset.shallow_clone(), *count);
             }
         }
         if new_audit != self.current_audit {
