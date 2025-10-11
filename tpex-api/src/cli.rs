@@ -3,7 +3,7 @@ use std::{collections::HashMap, pin::pin};
 use clap::Parser;
 use futures::StreamExt;
 use num_traits::Euclid;
-use tpex::{order::OrderType, AssetId, Auditable, Coins, PlayerId, State, WrappedAction, DIAMOND_NAME, DIAMOND_RAW_COINS};
+use tpex::{order::OrderType, AccountId, AssetId, Auditable, Coins, State, WrappedAction, DIAMOND_RAW_COINS};
 use tpex_api::Token;
 
 #[derive(clap::Subcommand)]
@@ -19,7 +19,7 @@ enum Command {
     /// Generate an itemised audit of income
     CashFlow {
         // Defaults to the owner of the provided token
-        account: Option<String>,
+        account: Option<AccountId<'static>>,
         // Gets the cash flow for the entire economy
         #[arg(long)]
         all: bool
@@ -49,7 +49,7 @@ async fn main() {
             // Convert coins to diamonds
             let (coins_from_diamonds, hopefully_no_remainder) = audit.coins.millicoins().div_rem_euclid(&DIAMOND_RAW_COINS.millicoins());
             assert_eq!(hopefully_no_remainder, 0, "Non-integer number of diamonds in bank");
-            *audit.assets.entry(DIAMOND_NAME.into()).or_default() += coins_from_diamonds;
+            *audit.assets.entry(AssetId::DIAMOND).or_default() += coins_from_diamonds;
 
             let mut x = Vec::from_iter(audit.assets);
             x.sort_by(|(a,_), (b, _)| a.cmp(b));
@@ -88,7 +88,7 @@ async fn main() {
         Command::CashFlow { account , all} => {
             let remote = tpex_api::Remote::new(args.endpoint.clone(), args.token);
             let account = match account {
-                Some(x) => AccountId::assume_username_correct(x),
+                Some(x) => x,
                 None => remote.get_token().await.expect("Failed to get token owner").user
             };
 
@@ -117,13 +117,13 @@ async fn main() {
                     tpex::Action::BuyCoins { player, n_diamonds: _ } => {
                         if all {
                             let this_revenue = state.itemised_audit().balance.coins.checked_sub(old_state.itemised_audit().balance.coins).unwrap();
-                            revenue.entry(DIAMOND_NAME.into())
+                            revenue.entry(AssetId::DIAMOND)
                                 .or_default()
                                 .checked_add_assign(this_revenue)
                                 .unwrap();
                         }
                         else if account.is_bank() || player == account {
-                            let bank_gain = state.get_bal(&AccountId::the_bank()).checked_sub(old_state.get_bal(&AccountId::the_bank())).unwrap();
+                            let bank_gain = state.get_bal(&AccountId::THE_BANK).checked_sub(old_state.get_bal(&AccountId::THE_BANK)).unwrap();
                             (
                                 if account.is_bank() {
                                     &mut revenue
@@ -132,7 +132,7 @@ async fn main() {
                                     &mut losses
                                 }
                             )
-                                .entry(DIAMOND_NAME.into())
+                                .entry(AssetId::DIAMOND)
                                 .or_default()
                                 .checked_add_assign(bank_gain)
                                 .unwrap();
@@ -142,7 +142,7 @@ async fn main() {
                         if !all && !account.is_bank() && player != account {
                             continue;
                         }
-                        let bank_gain = state.get_bal(&AccountId::the_bank()).checked_sub(old_state.get_bal(&AccountId::the_bank())).unwrap();
+                        let bank_gain = state.get_bal(&AccountId::THE_BANK).checked_sub(old_state.get_bal(&AccountId::THE_BANK)).unwrap();
                         (
                             if account.is_bank() {
                                 &mut revenue
@@ -151,7 +151,7 @@ async fn main() {
                                 &mut losses
                             }
                         )
-                            .entry(DIAMOND_NAME.into())
+                            .entry(AssetId::DIAMOND)
                             .or_default()
                             .checked_add_assign(bank_gain)
                             .unwrap();

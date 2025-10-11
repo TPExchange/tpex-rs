@@ -111,7 +111,7 @@ impl<Stream: tokio::io::AsyncWrite + Unpin> TPExState<Stream> {
         &self.state
     }
 
-    pub fn price_history(&self) -> &HashMap<tpex::AssetId, Vec<PriceSummary>> {
+    pub fn price_history(&self) -> &HashMap<tpex::AssetId<'_>, Vec<PriceSummary>> {
         &self.price_history
     }
     // async fn get_lines(&mut self) -> Vec<u8> {

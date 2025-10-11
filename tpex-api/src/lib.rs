@@ -115,7 +115,7 @@ impl Remote {
 
         Ok(Self::check_response(self.client.patch(target).json(action).send().await?).await?.json().await?)
     }
-    pub async fn get_token(&self) -> Result<TokenInfo> {
+    pub async fn get_token(&self) -> Result<TokenInfo<'_>> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /token").push("token");
 
@@ -170,7 +170,7 @@ impl Remote {
 
         Ok(Self::check_response(self.client.get(target).send().await?).await?.json().await?)
     }
-    pub async fn get_assets(&self, player: &tpex::AccountId<'_>) -> Result<std::collections::HashMap<AssetId, u64>> {
+    pub async fn get_assets(&self, player: &tpex::AccountId<'_>) -> Result<std::collections::HashMap<AssetId<'_>, u64>> {
         let mut target = self.endpoint.clone();
         target.path_segments_mut().expect("Unable to nav to /inspect/assets").push("inspect").push("assets");
         target.query_pairs_mut().append_pair("player", player.as_ref());

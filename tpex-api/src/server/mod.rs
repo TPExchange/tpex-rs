@@ -60,8 +60,7 @@ async fn state_patch(
     match token.level {
         TokenLevel::ReadOnly => return Err(Error::TokenTooLowLevel),
         TokenLevel::ProxyOne => {
-            let perms = state.tpex.read().await.state().perms(&action)?;
-            if perms.player != token.user {
+            if state.tpex.read().await.state().perms(&action)?.player != token.user {
                 return Err(Error::UncontrolledUser);
             }
         }
@@ -116,7 +115,7 @@ impl<S : Send + Sync> FromRequestParts<S> for OptionalWebSocket {
 async fn state_get(
     axum::extract::State(state): axum::extract::State<state_type!()>,
     // must extract token to auth
-    _token: TokenInfo,
+    _token: TokenInfo<'_>,
     axum_extra::extract::OptionalQuery(args): axum_extra::extract::OptionalQuery<StateGetArgs>,
     OptionalWebSocket(upgrade): OptionalWebSocket
 ) -> axum::response::Response {
@@ -176,15 +175,15 @@ async fn state_get(
 
 async fn token_get(
     axum::extract::State(_state): axum::extract::State<state_type!()>,
-    token: TokenInfo
-) -> axum::Json<TokenInfo> {
+    token: TokenInfo<'_>
+) -> axum::Json<TokenInfo<'_>> {
     axum::Json(token)
 }
 
 async fn token_post(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    token: TokenInfo,
-    axum::extract::Json(args): axum::extract::Json<TokenPostArgs>,
+    token: TokenInfo<'_>,
+    axum::extract::Json(args): axum::extract::Json<TokenPostArgs<'_>>,
 ) -> Result<axum::Json<Token>, Error> {
     if args.level > token.level {
         return Err(Error::TokenTooLowLevel)
@@ -198,7 +197,7 @@ async fn token_post(
 
 async fn token_delete(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    token: TokenInfo,
+    token: TokenInfo<'_>,
     axum::extract::Json(args): axum::extract::Json<TokenDeleteArgs>
 ) -> Result<axum::Json<()>, Error> {
     let target = args.token.unwrap_or(token.token);
@@ -212,7 +211,7 @@ async fn token_delete(
 
 async fn fastsync_get(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    _token: TokenInfo,
+    _token: TokenInfo<'_>,
     OptionalWebSocket(upgrade): OptionalWebSocket
 ) -> axum::response::Response {
     if let Some(upgrade) = upgrade {
@@ -250,31 +249,31 @@ async fn fastsync_get(
 
 async fn inspect_balance_get(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    _token: TokenInfo,
-    axum::extract::Query(args): axum::extract::Query<InspectBalanceGetArgs>
+    _token: TokenInfo<'_>,
+    axum::extract::Query(args): axum::extract::Query<InspectBalanceGetArgs<'_>>
 ) -> axum::response::Response {
     axum::Json(state.tpex.read().await.state().get_bal(&args.player)).into_response()
 }
 
 async fn inspect_assets_get(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    _token: TokenInfo,
-    axum::extract::Query(args): axum::extract::Query<InspectAssetsGetArgs>
+    _token: TokenInfo<'_>,
+    axum::extract::Query(args): axum::extract::Query<InspectAssetsGetArgs<'_>>
 ) -> axum::response::Response {
     axum::Json(state.tpex.read().await.state().get_assets(&args.player)).into_response()
 }
 
 async fn inspect_audit_get(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    _token: TokenInfo
+    _token: TokenInfo<'_>
 ) -> axum::response::Response {
     axum::Json(state.tpex.read().await.state().itemised_audit()).into_response()
 }
 
 async fn price_history_get(
     axum::extract::State(state): axum::extract::State<state_type!()>,
-    _token: TokenInfo,
-    axum::extract::Query(args): axum::extract::Query<PriceHistoryArgs>
+    _token: TokenInfo<'_>,
+    axum::extract::Query(args): axum::extract::Query<PriceHistoryArgs<'_>>
 ) -> axum::response::Response {
     axum::Json(state.tpex.read().await.price_history().get(&args.asset).unwrap_or(&Vec::default())).into_response()
 }
