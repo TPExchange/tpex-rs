@@ -66,7 +66,9 @@ pub enum Action<'a> {
         /// The player who should have the items taken away
         player: AccountId<'a>,
         /// The asset to remove
-        asset: ItemId<'a>,
+        ///
+        /// This is allowed to be an arbitrary item, so that bankers can delete ETPs
+        asset: AssetId<'a>,
         /// The amount of those items to be removed
         count: u64,
         /// The banker who submitted this action
@@ -301,29 +303,44 @@ pub struct Audit {
     pub assets: hashbrown::HashMap<AssetId<'static>, u64>
 }
 impl Audit {
-    pub fn add_asset(&mut self, asset: AssetId, count: u64) {
-        if count > 0 {
-            let entry = self.assets.cow_get_or_default(asset).1;
-            *entry = entry.checked_add(count).expect("Failed to add asset to audit");
-        }
-    }
-    pub fn sub_asset(&mut self, asset: &AssetId, count: u64) {
+    pub fn try_add_asset(&mut self, asset: AssetId, count: u64) -> Result<()> {
         if count == 0 {
-            return;
+            return Ok(())
+        }
+        let entry = self.assets.cow_get_or_default(asset).1;
+        *entry = entry.checked_add(count).ok_or(Error::Overflow)?;
+        Ok(())
+    }
+    pub fn add_asset(&mut self, asset: AssetId, count: u64) {
+        self.try_add_asset(asset, count).expect("Failed to add asset to audit");
+    }
+    pub fn try_sub_asset(&mut self, asset: &AssetId, count: u64) -> Result<()> {
+        if count == 0 {
+            return Ok(());
         }
         let hashbrown::hash_map::RawEntryMut::Occupied(mut entry) = self.assets.raw_entry_mut().from_key(asset.as_ref())
         else { panic!("Tried to remove empty asset from audit") };
         match entry.get().checked_sub(count) {
+            None => return Err(Error::Overflow),
             Some(0) => { entry.remove(); },
-            None => panic!("Failed to remove asset from audit"),
             Some(res) => { *entry.get_mut() = res; }
         }
+        Ok(())
+    }
+    pub fn sub_asset(&mut self, asset: &AssetId, count: u64) {
+        self.try_sub_asset(asset, count).expect("Failed to remove asset from audit")
+    }
+    pub fn try_add_coins(&mut self, count: Coins) -> Result<()> {
+        self.coins.checked_add_assign(count)
+    }
+    pub fn try_sub_coins(&mut self, count: Coins) -> Result<()> {
+        self.coins.checked_sub_assign(count)
     }
     pub fn add_coins(&mut self, count: Coins) {
-        self.coins.checked_add_assign(count).expect("Failed to add coins to audit")
+        self.try_add_coins(count).expect("Failed to add coins to audit")
     }
     pub fn sub_coins(&mut self, count: Coins) {
-        self.coins.checked_sub_assign(count).expect("Failed to remove coins from audit")
+        self.try_sub_coins(count).expect("Failed to remove coins from audit")
     }
 }
 impl Add for Audit {

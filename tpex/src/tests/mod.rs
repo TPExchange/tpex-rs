@@ -101,7 +101,7 @@ async fn deposit_undeposit() {
     assert_eq!(state.hard_audit(), Audit{coins: Coins::default(), assets: [(item.deep_clone().into(), 16384)].into_iter().collect()});
     state.apply(Action::Undeposit {
         player: player(1),
-        asset: item.shallow_clone(),
+        asset: item.shallow_clone().into(),
         count: 16384,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Undeposit failed");
@@ -124,14 +124,14 @@ async fn undeposit() {
     assert_eq!(state.get_assets(&player(1)).get(item.as_ref()).cloned(), Some(49));
     state.apply(Action::Undeposit {
         player: player(1),
-        asset: item.shallow_clone(),
+        asset: item.shallow_clone().into(),
         count: 48,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("First undeposit failed");
     assert_eq!(state.get_assets(&player(1)).get(item.as_ref()).cloned(), Some(1));
     state.apply(Action::Undeposit {
         player: player(1),
-        asset: item.shallow_clone(),
+        asset: item.shallow_clone().into(),
         count: 1,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Second undeposit failed");
