@@ -9,7 +9,7 @@ pub mod consts;
 pub use consts::*;
 
 pub mod ids;
-pub use ids::{AccountId, AssetId, ETPId, SharedId, UnsharedId};
+pub use ids::{AccountId, AssetId, ItemId, ETPId, SharedId, UnsharedId};
 pub mod balance;
 pub mod order;
 pub mod withdrawal;
@@ -55,7 +55,7 @@ pub enum Action<'a> {
         /// The player who should be credited with these assets
         player: AccountId<'a>,
         /// The asset to deposit
-        asset: AssetId<'a>,
+        asset: ItemId<'a>,
         /// The number of that asset to deposit
         count: u64,
         /// The banker who performed the deposit
@@ -66,7 +66,7 @@ pub enum Action<'a> {
         /// The player who should have the items taken away
         player: AccountId<'a>,
         /// The asset to remove
-        asset: AssetId<'a>,
+        asset: ItemId<'a>,
         /// The amount of those items to be removed
         count: u64,
         /// The banker who submitted this action
@@ -77,7 +77,7 @@ pub enum Action<'a> {
         /// The player who requested the withdrawal
         player: AccountId<'a>,
         /// The assets to withdraw
-        assets: hashbrown::HashMap<AssetId<'static>,u64>
+        assets: hashbrown::HashMap<ItemId<'static>,u64>
     },
     /// A banker has agreed to take out assets imminently
     CompleteWithdrawal {
@@ -136,7 +136,7 @@ pub enum Action<'a> {
     /// Updates the list of assets that require prior authorisation from an admin
     UpdateRestricted {
         /// The new list of assets that are restricted
-        restricted_assets: hashbrown::HashSet<AssetId<'static>>,
+        restricted_assets: hashbrown::HashSet<ItemId<'static>>,
     },
     /// Allows a player to place new withdrawal requests up to new_count of an item
     ///
@@ -145,7 +145,7 @@ pub enum Action<'a> {
         /// The player whose authorisation is being adjusted
         authorisee: AccountId<'a>,
         /// The asset that should be authorised
-        asset: AssetId<'a>,
+        asset: ItemId<'a>,
         /// The new maximum amount this player can withdraw
         new_count: u64
     },
@@ -250,11 +250,11 @@ impl<'a> Action<'a> {
     fn adjust_audit(&self, mut audit: Audit) -> Option<Audit> {
         match self {
             Action::Deposit { asset, count, .. } => {
-                audit.add_asset(asset.shallow_clone(), *count);
+                audit.add_asset(asset.shallow_clone().into(), *count);
                 Some(audit)
             },
             Action::Undeposit { asset, count, .. } => {
-                audit.sub_asset(asset, *count);
+                audit.sub_asset(&asset.shallow_clone().into(), *count);
                 Some(audit)
             }
             Action::CompleteWithdrawal{..} => {
@@ -375,7 +375,7 @@ pub enum Error {
         amount_overdrawn: Coins
     },
     UnauthorisedWithdrawal{
-        asset: AssetId<'static>,
+        asset: ItemId<'static>,
         // Set to be None if the player has no authorization at all to withdraw this
         amount_overdrawn: Option<u64>
     },
@@ -549,9 +549,9 @@ impl State {
     /// Prices for an asset, returns (price, amount) in (buy, sell)
     pub fn get_prices(&self, asset: &AssetId) -> (std::collections::BTreeMap<Coins, u64>, std::collections::BTreeMap<Coins, u64>) { self.order.get_prices(asset) }
     /// Returns true if the given item is currently restricted
-    pub fn is_restricted(&self, asset: &AssetId) -> bool { self.auth.is_restricted(asset) }
+    pub fn is_restricted(&self, asset: &ItemId) -> bool { self.auth.is_restricted(asset) }
     /// Lists all restricted items
-    pub fn get_restricted(&self) -> impl IntoIterator<Item = &AssetId<'_>> { self.auth.get_restricted() }
+    pub fn get_restricted(&self) -> impl IntoIterator<Item = &ItemId<'_>> { self.auth.get_restricted() }
     /// Gets a list of all bankers
     pub fn get_bankers(&self) -> &hashbrown::HashSet<AccountId<'_>> { self.shared_account.the_bank().owners() }
     /// Returns true if the given player is an banker
@@ -631,14 +631,14 @@ impl State {
             Action::Deleted{..} => Ok(()),
             Action::Deposit { player, asset, count, banker } => {
                 self.check_banker(&banker)?;
-                self.balance.commit_asset_add(player.shallow_clone(), asset.shallow_clone(), count);
+                self.balance.commit_asset_add(player.shallow_clone(), asset.shallow_clone().into(), count);
                 self.auth.increase_authorisation(player, asset, count).expect("Authorisation overflow");
 
                 Ok(())
             },
             Action::Undeposit { player, asset, count, banker } => {
                 self.check_banker(&banker)?;
-                self.balance.commit_asset_removal(player, asset, count)
+                self.balance.commit_asset_removal(player, asset.into(), count)
             },
             Action::RequestWithdrawal { player, assets} => {
                 // Shared accounts cannot directly withdraw
@@ -650,21 +650,17 @@ impl State {
                 // BTreeMap ensures that the same asset cannot occur twice, so we don't have to worry about double spending
                 for (asset, count) in assets.iter() {
                     // Check to see if they can afford it
-                    self.balance.check_asset_removal(player.shallow_clone(), asset.shallow_clone(), *count)?;
+                    self.balance.check_asset_removal(player.shallow_clone(), asset.shallow_clone().into(), *count)?;
                     // Check to see if they are allowed it
                     self.auth.check_withdrawal_authorized(&player, asset, *count)?;
-                    // Check to make sure they're not trying to withdraw ETPs, because that makes no sense
-                    if matches!(asset, AssetId::ETP(_)) {
-                        return Err(Error::UnauthorisedWithdrawal { asset: asset.clone(), amount_overdrawn: None })
-                    }
                 }
 
                 // Now take the assets, as we've confirmed they can afford it
                 for (asset, count) in assets.iter() {
-                    // Remove assets
-                    self.balance.commit_asset_removal(player.shallow_clone(), asset.shallow_clone(), *count).expect("Assets disappeared after check");
                     // Remove allowance if restricted
                     self.auth.commit_withdrawal_authorized(&player, asset, *count).expect("Auth disappeared after check");
+                    // Remove assets
+                    self.balance.commit_asset_removal(player.shallow_clone(), asset.into(), *count).expect("Assets disappeared after check");
                 }
 
                 // Register the withdrawal. This cannot fail, so we don't have to worry about atomicity
@@ -677,8 +673,8 @@ impl State {
                 let withdrawal = self.withdrawal.finalise(target)?;
                 // Credit the account and reauthorise the assets
                 for (asset, count) in withdrawal.assets {
-                    self.balance.commit_asset_add(withdrawal.player.shallow_clone(), asset.shallow_clone(), count);
-                    self.auth.increase_authorisation(withdrawal.player.shallow_clone(), asset.shallow_clone(), count).expect("Authorisation overflow in cancelled order");
+                    self.balance.commit_asset_add(withdrawal.player.shallow_clone(), asset.shallow_clone().into(), count);
+                    self.auth.increase_authorisation(withdrawal.player.shallow_clone(), asset, count).expect("Authorisation overflow in cancelled order");
                 }
                 Ok(())
             }
@@ -771,7 +767,7 @@ impl State {
                 // Authorise everyone who is already holding the item to withdraw what they have
                 for asset in newly_restricted {
                     for (player, their_assets) in self.balance.get_all_assets() {
-                        let Some(count) = their_assets.get(&asset).copied() else { continue; };
+                        let Some(count) = their_assets.get(asset.as_ref()).copied() else { continue; };
                         self.auth.set_authorisation(player.clone(), asset.clone(), count);
                     }
                 }

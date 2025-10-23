@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ids::HashMapCowExt, AccountId, AssetId, Error, Result, SharedId};
+use crate::{ids::HashMapCowExt, AccountId, Error, ItemId, Result, SharedId};
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct AuthSync {
     /// The restricted assets
-    pub restricted: hashbrown::HashSet<AssetId<'static>>,
+    pub restricted: hashbrown::HashSet<ItemId<'static>>,
     /// The authorisations that various players have
-    pub authorisations: hashbrown::HashMap<AccountId<'static>, hashbrown::HashMap<AssetId<'static>, u64>>,
+    pub authorisations: hashbrown::HashMap<AccountId<'static>, hashbrown::HashMap<ItemId<'static>, u64>>,
     /// The shared accounts allowed to issue ETPs
     pub etp_authorised: hashbrown::HashSet<SharedId<'static>>,
 }
@@ -35,9 +35,9 @@ impl TryFrom<AuthSync> for AuthTracker {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct AuthTracker {
     /// The restricted assets
-    restricted: hashbrown::HashSet<AssetId<'static>>,
+    restricted: hashbrown::HashSet<ItemId<'static>>,
     /// The authorisations that various players have
-    authorisations: hashbrown::HashMap<AccountId<'static>, hashbrown::HashMap<AssetId<'static>, u64>>,
+    authorisations: hashbrown::HashMap<AccountId<'static>, hashbrown::HashMap<ItemId<'static>, u64>>,
     /// The shared accounts allowed to issue ETPs
     pub etp_authorised: hashbrown::HashSet<SharedId<'static>>,
 }
@@ -55,13 +55,13 @@ impl AuthTracker {
         }
     }
     /// Returns true if the given item is currently restricted
-    pub fn is_restricted(&self, asset: &AssetId) -> bool { self.restricted.contains(asset) }
+    pub fn is_restricted(&self, asset: &ItemId) -> bool { self.restricted.contains(asset) }
     /// Lists all restricted items
-    pub fn get_restricted(&self) -> &hashbrown::HashSet<AssetId<'static>> { &self.restricted }
+    pub fn get_restricted(&self) -> &hashbrown::HashSet<ItemId<'static>> { &self.restricted }
     /// Sets the maximum amount a player is able to withdraw of a restricted item.
     ///
     /// XXX: This can and will nuke existing values, so check those race conditions
-    pub fn set_authorisation(&mut self, player: AccountId, asset: AssetId, new_count: u64) {
+    pub fn set_authorisation(&mut self, player: AccountId, asset: ItemId, new_count: u64) {
         // Clean up the entry (or even the player) if they're being deauthed
         if new_count == 0 {
             let player_auths = self.authorisations.get_mut(player.as_ref()).unwrap();
@@ -77,13 +77,13 @@ impl AuthTracker {
     /// Increases the maximum amount of an item a player is allowed to withdraw
     ///
     /// @returns The new limit the player has
-    pub fn increase_authorisation<'player>(&mut self, player: AccountId<'player>, asset: AssetId, increase: u64) -> Result<u64> {
+    pub fn increase_authorisation<'player>(&mut self, player: AccountId<'player>, asset: ItemId, increase: u64) -> Result<u64> {
         self.authorisations.cow_get_or_default(player).1
             .cow_get_or_default(asset).1
             .checked_add(increase).ok_or(Error::Overflow)
     }
     /// Updates the list of restricted assets
-    pub fn update_restricted(&mut self, restricted: hashbrown::HashSet<AssetId<'static>>) {
+    pub fn update_restricted(&mut self, restricted: hashbrown::HashSet<ItemId<'static>>) {
         // Clean up the irrelevant tables, so that auths don't secretly lie around
         let newly_unrestricted = self.restricted.difference(&restricted);
         for i in newly_unrestricted {
@@ -94,7 +94,7 @@ impl AuthTracker {
         self.restricted = restricted;
     }
     /// Checks to see if a player can withdraw a certain asset
-    pub fn check_withdrawal_authorized(&self, player: &AccountId, asset: &AssetId, count: u64) -> Result<()> {
+    pub fn check_withdrawal_authorized(&self, player: &AccountId, asset: &ItemId, count: u64) -> Result<()> {
         // If it's unrestricted, they can withdraw as much as they like
         if !self.is_restricted(asset) {
             return Ok(())
@@ -109,7 +109,7 @@ impl AuthTracker {
         Ok(())
     }
     /// Tries to remove assets for a player
-    pub fn commit_withdrawal_authorized(&mut self, player: &AccountId, asset: &AssetId, count: u64) -> Result<()> {
+    pub fn commit_withdrawal_authorized(&mut self, player: &AccountId, asset: &ItemId, count: u64) -> Result<()> {
         // If it's unrestricted, they can withdraw as much as they like
         if !self.is_restricted(asset) {
             return Ok(())

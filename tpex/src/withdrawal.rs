@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Coins;
+use crate::ItemId;
 
-use super::{AssetId, Audit, Auditable, Error, AccountId};
+use super::{Audit, Auditable, Error, AccountId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingSync {
     pub player: AccountId<'static>,
-    pub assets: hashbrown::HashMap<AssetId<'static>, u64>,
+    pub assets: hashbrown::HashMap<ItemId<'static>, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +35,7 @@ impl TryFrom<WithdrawalSync> for WithdrawalTracker {
                 value.pending_withdrawals.into_iter()
                 .map(|(id, PendingSync { player, assets })| {
                     for (asset, count) in &assets {
-                        current_audit.add_asset(asset.clone(), *count);
+                        current_audit.add_asset(asset.shallow_clone().into(), *count);
                     }
                     (id, PendingWithdrawal { player, assets, id })
                 })
@@ -49,7 +49,7 @@ impl TryFrom<WithdrawalSync> for WithdrawalTracker {
 pub struct PendingWithdrawal {
     pub id: u64,
     pub player: AccountId<'static>,
-    pub assets: hashbrown::HashMap<AssetId<'static>, u64>
+    pub assets: hashbrown::HashMap<ItemId<'static>, u64>
 }
 // impl<'a> PendingWithdrawal<'a> {
 //     fn shallow_clone(&'a self) -> Self {
@@ -81,9 +81,11 @@ impl WithdrawalTracker {
     pub fn get_next_withdrawal(&self) -> Option<&PendingWithdrawal> {
         self.pending_withdrawals.values().next()
     }
-    pub fn track(&mut self, id: u64, player: AccountId, assets: hashbrown::HashMap<AssetId<'static>, u64>)  {
+    pub fn track(&mut self, id: u64, player: AccountId, assets: hashbrown::HashMap<ItemId<'static>, u64>)  {
+        for (asset, count) in &assets {
+            self.current_audit.add_asset(asset.shallow_clone().into(), *count);
+        }
         self.pending_withdrawals.insert(id, PendingWithdrawal{ id, player: player.into_owned(), assets: assets.clone() });
-        self.current_audit += Audit{coins: Coins::default(), assets};
     }
     /// Stops tracking the withdrawal, either for a completion or a cancel
     pub fn finalise(&mut self, id: u64) -> Result<PendingWithdrawal, Error> {
@@ -92,7 +94,7 @@ impl WithdrawalTracker {
         else { return Err(Error::InvalidId{id}); };
         // We no longer have the items
         for (asset, count) in res.assets.iter() {
-            self.current_audit.sub_asset(asset, *count);
+            self.current_audit.sub_asset(&asset.shallow_clone().into(), *count);
         }
         Ok(res)
     }
@@ -104,7 +106,7 @@ impl Auditable for WithdrawalTracker {
         let mut new_audit = Audit::default();
         for withdrawal in self.pending_withdrawals.values() {
             for (asset, count) in &withdrawal.assets {
-                new_audit.add_asset(asset.shallow_clone(), *count);
+                new_audit.add_asset(asset.shallow_clone().into(), *count);
             }
         }
         if new_audit != self.current_audit {

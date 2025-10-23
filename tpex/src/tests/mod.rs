@@ -89,19 +89,19 @@ async fn deposit_undeposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
-    let item = AssetId::try_from("cobblestone").unwrap();
+    let item = ItemId::try_from("cobblestone").unwrap();
 
     state.apply(Action::Deposit {
         player: player(1),
-        asset: item.clone(),
+        asset: item.shallow_clone(),
         count: 16384,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Deposit failed");
-    assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), Some(16384));
-    assert_eq!(state.hard_audit(), Audit{coins: Coins::default(), assets: [(item.clone(), 16384)].into_iter().collect()});
+    assert_eq!(state.get_assets(&player(1)).get(item.as_ref()).cloned(), Some(16384));
+    assert_eq!(state.hard_audit(), Audit{coins: Coins::default(), assets: [(item.deep_clone().into(), 16384)].into_iter().collect()});
     state.apply(Action::Undeposit {
         player: player(1),
-        asset: item.clone(),
+        asset: item.shallow_clone(),
         count: 16384,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Undeposit failed");
@@ -113,29 +113,29 @@ async fn undeposit() {
     let mut state = State::new();
     let mut sink = WriteSink::default();
 
-    let item = AssetId::try_from("cobblestone").unwrap();
+    let item = ItemId::try_from("cobblestone").unwrap();
 
     state.apply(Action::Deposit {
         player: player(1),
-        asset: item.clone(),
+        asset: item.shallow_clone(),
         count: 49,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Deposit failed");
-    assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), Some(49));
+    assert_eq!(state.get_assets(&player(1)).get(item.as_ref()).cloned(), Some(49));
     state.apply(Action::Undeposit {
         player: player(1),
-        asset: item.clone(),
+        asset: item.shallow_clone(),
         count: 48,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("First undeposit failed");
-    assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), Some(1));
+    assert_eq!(state.get_assets(&player(1)).get(item.as_ref()).cloned(), Some(1));
     state.apply(Action::Undeposit {
         player: player(1),
-        asset: item.clone(),
+        asset: item.shallow_clone(),
         count: 1,
         banker: AccountId::THE_BANK
     }, &mut sink).await.expect("Second undeposit failed");
-    assert_eq!(state.get_assets(&player(1)).get(&item).cloned(), None);
+    assert_eq!(state.get_assets(&player(1)).get(item.as_ref()).cloned(), None);
     assert_eq!(state.hard_audit(), Audit::default());
 }
 
@@ -268,18 +268,18 @@ async fn lifecycle() {
         players: vec![player(1), player(2), player(3), AccountId::THE_BANK]
     };
 
-    let item = AssetId::try_from("cobblestone").unwrap();
+    let item = ItemId::try_from("cobblestone").unwrap();
 
     println!("Deposit 1");
     state.assert_state(
         Action::Deposit {
             player: player(1),
-            asset: item.clone(),
+            asset: item.shallow_clone(),
             count: 64,
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64)],
             ..Default::default()
         }
     ).await;
@@ -287,12 +287,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::Deposit {
             player: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone(),
             count: 128,
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64), (player(2), item.clone(), 128)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64), (player(2), item.shallow_clone().into(), 128)],
             ..Default::default()
         }
     ).await;
@@ -300,12 +300,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::Deposit {
             player: player(3),
-            asset: AssetId::DIAMOND,
+            asset: ItemId::DIAMOND,
             count: 64,
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64), (player(2), item.clone(), 128), (player(3), AssetId::DIAMOND, 64)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64), (player(2), item.shallow_clone().into(), 128), (player(3), AssetId::DIAMOND, 64)],
             ..Default::default()
         }
     ).await;
@@ -316,22 +316,22 @@ async fn lifecycle() {
             n_diamonds: 64
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64), (player(2), item.clone(), 128)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64), (player(2), item.shallow_clone().into(), 128)],
             diamonds_sold: vec![(player(3), 64)],
             ..Default::default()
         }
     ).await;
-    assert_eq!(state.state.hard_audit(), Audit{coins: Coins::from_coins(64000), assets: [(item.clone(), 192)].into_iter().collect()});
+    assert_eq!(state.state.hard_audit(), Audit{coins: Coins::from_coins(64000), assets: [(item.deep_clone().into(), 192)].into_iter().collect()});
     println!("Purposefully failing buy order");
     state.assert_state(
         Action::BuyOrder {
             player: player(1),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 64,
             coins_per: Coins::from_millicoins(1000)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64), (player(2), item.clone(), 128)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64), (player(2), item.shallow_clone().into(), 128)],
             should_fail: true,
             ..Default::default()
         }
@@ -340,12 +340,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::SellOrder {
             player: player(1),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 32,
             coins_per: Coins::from_coins(1)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 32), (player(2), item.clone(), 128)],
+            assets: vec![(player(1), item.shallow_clone().into(), 32), (player(2), item.shallow_clone().into(), 128)],
             ..Default::default()
         }
     ).await;
@@ -353,12 +353,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::SellOrder {
             player: player(1),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 16,
             coins_per: Coins::from_coins(3)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 128)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 128)],
             ..Default::default()
         }
     ).await;
@@ -366,12 +366,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::SellOrder {
             player: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 16,
             coins_per: Coins::from_coins(2)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 112)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 112)],
             ..Default::default()
         }
     ).await;
@@ -379,12 +379,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::SellOrder {
             player: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 16,
             coins_per: Coins::from_coins(2)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 96)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 96)],
             ..Default::default()
         }
     ).await;
@@ -392,12 +392,12 @@ async fn lifecycle() {
     let cancel_me = state.assert_state(
         Action::SellOrder {
             player: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 16,
             coins_per: Coins::from_coins(1)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 80)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 80)],
             ..Default::default()
         }
     ).await.unwrap();
@@ -407,7 +407,7 @@ async fn lifecycle() {
             target: cancel_me
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 96)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 96)],
             ..Default::default()
         }
     ).await.unwrap();
@@ -415,12 +415,12 @@ async fn lifecycle() {
     state.assert_state(
         Action::SellOrder {
             player: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 16,
             coins_per: Coins::from_coins(10)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 80)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 80)],
             ..Default::default()
         }
     ).await;
@@ -428,17 +428,17 @@ async fn lifecycle() {
     state.assert_state(
         Action::SellOrder {
             player: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 16,
             coins_per: Coins::from_coins(1)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 64)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 64)],
             ..Default::default()
         }
     ).await;
     println!("Initial orders:\n{}", pretty_orders(&state.state));
-    assert_eq!(state.state.get_prices(&item), (
+    assert_eq!(state.state.get_prices(&item.shallow_clone().into()), (
         BTreeMap::from_iter([
 
         ]),
@@ -454,19 +454,19 @@ async fn lifecycle() {
     state.assert_state(
         Action::BuyOrder {
             player: player(3),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 40,
             coins_per: Coins::from_coins(4)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 64), (player(3), item.clone(), 40)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 64), (player(3), item.shallow_clone().into(), 40)],
             sell_profit: vec![(player(1), Coins::from_coins(32)), (player(2), Coins::from_coins(8))],
             buy_cost: vec![(player(3), Coins::from_coins(40))],
             ..Default::default()
         }
     ).await;
     println!("Post buy 1:\n{}", pretty_orders(&state.state));
-    assert_eq!(state.state.get_prices(&item), (
+    assert_eq!(state.state.get_prices(&item.shallow_clone().into()), (
         BTreeMap::from_iter([
 
         ]),
@@ -481,19 +481,19 @@ async fn lifecycle() {
     state.assert_state(
         Action::BuyOrder {
             player: player(3),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 80,
             coins_per: Coins::from_coins(4)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 64), (player(3), item.clone(), 96)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 64), (player(3), item.shallow_clone().into(), 96)],
             sell_profit: vec![(player(1), Coins::from_coins(48)), (player(2), Coins::from_coins(72))],
             buy_cost: vec![(player(3), Coins::from_coins(216))],
             unfulfilled: vec![(player(3), Coins::from_coins(24 * 4))],
             ..Default::default()
         }
     ).await;
-    assert_eq!(state.state.get_prices(&item), (
+    assert_eq!(state.state.get_prices(&item.shallow_clone().into()), (
         BTreeMap::from_iter([
             (Coins::from_coins(4), 24),
         ]),
@@ -507,12 +507,12 @@ async fn lifecycle() {
     let cancel_me = state.assert_state(
         Action::BuyOrder {
             player: player(3),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 1,
             coins_per: Coins::from_millicoins(1)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 64), (player(3), item.clone(), 96)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 64), (player(3), item.shallow_clone().into(), 96)],
             buy_cost: vec![(player(3), Coins::from_millicoins(1))],
             unfulfilled: vec![(player(3), Coins::from_millicoins(1))],
             ..Default::default()
@@ -526,7 +526,7 @@ async fn lifecycle() {
             target: cancel_me
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 64), (player(3), item.clone(), 96)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 64), (player(3), item.shallow_clone().into(), 96)],
             coins_appeared: vec![(player(3), Coins::from_millicoins(1).fee_ppm(state.state.rates.buy_order_ppm + 1_000_000).unwrap())],
             ..Default::default()
         }
@@ -537,26 +537,26 @@ async fn lifecycle() {
     state.assert_state(
         Action::SellOrder {
             player: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 24,
             coins_per: Coins::from_coins(4)
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 120)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 40), (player(3), item.shallow_clone().into(), 120)],
             sell_profit: vec![(player(2), Coins::from_coins(96))],
             fulfilled: vec![(player(3), Coins::from_coins(24 * 4))],
             ..Default::default()
         }
     ).await;
     println!("Post sell 8:\n{}", pretty_orders(&state.state));
-    assert_eq!(state.state.get_prices(&item), (
+    assert_eq!(state.state.get_prices(&item.shallow_clone().into()), (
         BTreeMap::from_iter([
         ]),
         BTreeMap::from_iter([
             (Coins::from_coins(10), 16),
         ]),
     ));
-    assert_eq!(state.state.hard_audit(), Audit{coins: Coins::from_coins(64000), assets: [(item.clone(), 192)].into_iter().collect()});
+    assert_eq!(state.state.hard_audit(), Audit{coins: Coins::from_coins(64000), assets: [(item.deep_clone().into(), 192)].into_iter().collect()});
 
     println!("Sell coins");
     state.assert_state(
@@ -565,7 +565,7 @@ async fn lifecycle() {
             n_diamonds: 32,
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 120), (player(3), AssetId::DIAMOND, 32)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 40), (player(3), item.shallow_clone().into(), 120), (player(3), AssetId::DIAMOND, 32)],
             diamonds_bought: vec![(player(3), 32)],
             ..Default::default()
         }
@@ -576,10 +576,10 @@ async fn lifecycle() {
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(3),
-            assets: [(item.clone(), 192)].into()
+            assets: [(item.deep_clone(), 192)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 120), (player(3), AssetId::DIAMOND, 32)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 40), (player(3), item.shallow_clone().into(), 120), (player(3), AssetId::DIAMOND, 32)],
             should_fail: true,
             ..Default::default()
         }
@@ -589,10 +589,10 @@ async fn lifecycle() {
     let target = state.assert_state(
         Action::RequestWithdrawal {
             player: player(3),
-            assets: [(item.clone(), 120)].into()
+            assets: [(item.deep_clone(), 120)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 0), (player(3), AssetId::DIAMOND, 32)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 40), (player(3), item.shallow_clone().into(), 0), (player(3), AssetId::DIAMOND, 32)],
             ..Default::default()
         }
     ).await.unwrap();
@@ -604,7 +604,7 @@ async fn lifecycle() {
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 16), (player(2), item.clone(), 40), (player(3), item.clone(), 0), (player(3), AssetId::DIAMOND, 32)],
+            assets: vec![(player(1), item.shallow_clone().into(), 16), (player(2), item.shallow_clone().into(), 40), (player(3), item.shallow_clone().into(), 0), (player(3), AssetId::DIAMOND, 32)],
             ..Default::default()
         }
     ).await;
@@ -622,8 +622,8 @@ async fn lifecycle() {
 
 #[tokio::test]
 async fn authorisations() {
-    let authed = AssetId::try_from("cobblestone").unwrap();
-    let unauthed = AssetId::try_from("wither_skeleton_skull").unwrap();
+    let authed = ItemId::try_from("cobblestone").unwrap();
+    let unauthed = ItemId::try_from("wither_skeleton_skull").unwrap();
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
@@ -638,7 +638,7 @@ async fn authorisations() {
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1)],
             ..Default::default()
         }
     ).await;
@@ -651,17 +651,17 @@ async fn authorisations() {
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 100)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 100)],
             ..Default::default()
         }
     ).await;
     println!("Restricting item");
     state.assert_state(
         Action::UpdateRestricted {
-            restricted_assets: [unauthed.clone()].into_iter().collect(),
+            restricted_assets: [unauthed.deep_clone()].into_iter().collect(),
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 100)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 100)],
             ..Default::default()
         }
     ).await;
@@ -669,10 +669,10 @@ async fn authorisations() {
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(1),
-            assets: [(unauthed.clone(), 1)].into()
+            assets: [(unauthed.deep_clone(), 1)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 99)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 99)],
             ..Default::default()
         }
     ).await;
@@ -681,11 +681,11 @@ async fn authorisations() {
         Action::TransferAsset {
             payer: player(1),
             payee: player(2),
-            asset: unauthed.clone(),
+            asset: unauthed.shallow_clone().into(),
             count: 2
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97), (player(2), unauthed.shallow_clone().into(), 2)],
             ..Default::default()
         }
     ).await;
@@ -693,10 +693,10 @@ async fn authorisations() {
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(2),
-            assets: [(unauthed.clone(), 2)].into()
+            assets: [(unauthed.deep_clone(), 2)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97), (player(2), unauthed.shallow_clone().into(), 2)],
             should_fail: true,
             ..Default::default()
         }
@@ -709,7 +709,7 @@ async fn authorisations() {
             new_count: 1
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97), (player(2), unauthed.shallow_clone().into(), 2)],
             ..Default::default()
         }
     ).await;
@@ -717,10 +717,10 @@ async fn authorisations() {
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(2),
-            assets: [(unauthed.clone(), 2)].into()
+            assets: [(unauthed.deep_clone(), 2)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 2)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97), (player(2), unauthed.shallow_clone().into(), 2)],
             should_fail: true,
             ..Default::default()
         }
@@ -729,10 +729,10 @@ async fn authorisations() {
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(2),
-            assets: [(unauthed.clone(), 1)].into()
+            assets: [(unauthed.deep_clone(), 1)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97), (player(2), unauthed.shallow_clone().into(), 1)],
             ..Default::default()
         }
     ).await;
@@ -740,10 +740,10 @@ async fn authorisations() {
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(2),
-            assets: [(unauthed.clone(), 1)].into()
+            assets: [(unauthed.deep_clone(), 1)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97), (player(2), unauthed.shallow_clone().into(), 1)],
             should_fail: true,
             ..Default::default()
         }
@@ -754,7 +754,7 @@ async fn authorisations() {
             restricted_assets: Default::default(),
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97), (player(2), unauthed.clone(), 1)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97), (player(2), unauthed.shallow_clone().into(), 1)],
             ..Default::default()
         }
     ).await;
@@ -762,10 +762,10 @@ async fn authorisations() {
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(2),
-            assets: [(unauthed.clone(), 1)].into()
+            assets: [(unauthed.deep_clone(), 1)].into()
         },
         ExpectedState {
-            assets: vec![(player(1), authed.clone(), 1), (player(1), unauthed.clone(), 97)],
+            assets: vec![(player(1), authed.shallow_clone().into(), 1), (player(1), unauthed.shallow_clone().into(), 97)],
             ..Default::default()
         }
     ).await;
@@ -834,28 +834,28 @@ async fn transfer_asset() {
         sink: WriteSink::default(),
         players: vec![player(1), player(2), player(3), AccountId::THE_BANK]
     };
-    let item = AssetId::try_from("cobblestone").unwrap();
+    let item = ItemId::try_from("cobblestone").unwrap();
     state.assert_state(
         Action::Deposit {
             player: player(1),
-            asset: item.clone(),
+            asset: item.shallow_clone(),
             count: 64,
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64)],
             ..Default::default()
         }
     ).await;
     state.assert_state(
         Action::Deposit {
             player: player(2),
-            asset: AssetId::DIAMOND,
+            asset: ItemId::DIAMOND,
             count: 2,
             banker: AccountId::THE_BANK
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64), (player(2), AssetId::DIAMOND, 2)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64), (player(2), AssetId::DIAMOND, 2)],
             ..Default::default()
         }
     ).await;
@@ -865,7 +865,7 @@ async fn transfer_asset() {
             n_diamonds: 2
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 64)],
+            assets: vec![(player(1), item.shallow_clone().into(), 64)],
             diamonds_sold: vec![(player(2), 2)],
             ..Default::default()
         }
@@ -874,11 +874,11 @@ async fn transfer_asset() {
         Action::TransferAsset {
             payer: player(1),
             payee: player(2),
-            asset: item.clone(),
+            asset: item.shallow_clone().into(),
             count: 4,
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 60), (player(2), item.clone(), 4)],
+            assets: vec![(player(1), item.shallow_clone().into(), 60), (player(2), item.shallow_clone().into(), 4)],
             ..Default::default()
         }
     ).await;
@@ -889,7 +889,7 @@ async fn transfer_asset() {
             count: Coins::from_coins(37),
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 60), (player(2), item.clone(), 4)],
+            assets: vec![(player(1), item.shallow_clone().into(), 60), (player(2), item.shallow_clone().into(), 4)],
             coins_appeared: vec![(player(1), Coins::from_coins(37))],
             coins_disappeared: vec![(player(2), Coins::from_coins(37))],
             ..Default::default()
@@ -902,7 +902,7 @@ async fn transfer_asset() {
             count: Coins::from_coins(963),
         },
         ExpectedState {
-            assets: vec![(player(1), item.clone(), 60), (player(2), item.clone(), 4)],
+            assets: vec![(player(1), item.shallow_clone().into(), 60), (player(2), item.shallow_clone().into(), 4)],
             coins_appeared: vec![(player(1), Coins::from_coins(963))],
             coins_disappeared: vec![(player(2), Coins::from_coins(963))],
             ..Default::default()
@@ -915,7 +915,7 @@ async fn transfer_asset() {
 async fn reload_state() {
     let mut state = State::new();
     let mut log = Vec::new();
-    let item = AssetId::try_from("cobblestone").unwrap();
+    let item = ItemId::try_from("cobblestone").unwrap();
     for i in [
         Action::Deposit { player: player(1), asset: item.shallow_clone(), count: 1, banker: AccountId::THE_BANK },
         Action::Deposit { player: player(1), asset: item.shallow_clone(), count: 2, banker: AccountId::THE_BANK },
@@ -1002,7 +1002,7 @@ async fn test_shared() {
     state.assert_state(
         Action::Deposit {
             player: player(1),
-            asset: AssetId::DIAMOND,
+            asset: ItemId::DIAMOND,
             count: 16,
             banker: AccountId::THE_BANK
         },
@@ -1536,7 +1536,7 @@ async fn issue_etp() {
 
 #[tokio::test]
 async fn withdrawal() {
-    let asset = AssetId::try_from("cobblestone").unwrap();
+    let item = ItemId::try_from("cobblestone").unwrap();
     let mut state = MatchStateWrapper {
         state: State::new(),
         sink: WriteSink::default(),
@@ -1546,19 +1546,19 @@ async fn withdrawal() {
     state.assert_state(
         Action::Deposit {
             player: player(1),
-            asset: asset.clone(),
+            asset: item.clone(),
             count: 64,
             banker: AccountId::THE_BANK
         },
-        ExpectedState { assets: vec![(player(1), asset.clone(), 64)], ..Default::default() }
+        ExpectedState { assets: vec![(player(1), item.shallow_clone().into(), 64)], ..Default::default() }
     ).await;
     // Request a withdrawal
     let id = state.assert_state(
         Action::RequestWithdrawal {
             player: player(1),
-            assets: [(asset.clone(), 32)].into(),
+            assets: [(item.clone(), 32)].into(),
         },
-        ExpectedState { assets: vec![(player(1), asset.clone(), 32)], ..Default::default() }
+        ExpectedState { assets: vec![(player(1), item.shallow_clone().into(), 32)], ..Default::default() }
     ).await.unwrap();
     // Cancel the withdrawal
     state.assert_state(
@@ -1566,15 +1566,15 @@ async fn withdrawal() {
             target: id,
             banker: AccountId::THE_BANK
         },
-        ExpectedState { assets: vec![(player(1), asset.clone(), 64)], ..Default::default() }
+        ExpectedState { assets: vec![(player(1), item.shallow_clone().into(), 64)], ..Default::default() }
     ).await;
     // Request a withdrawal again
     let id = state.assert_state(
         Action::RequestWithdrawal {
             player: player(1),
-            assets: [(asset.clone(), 16)].into(),
+            assets: [(item.clone(), 16)].into(),
         },
-        ExpectedState { assets: vec![(player(1), asset.clone(), 48)], ..Default::default() }
+        ExpectedState { assets: vec![(player(1), item.shallow_clone().into(), 48)], ..Default::default() }
     ).await.unwrap();
     // Complete the withdrawal
     state.assert_state(
@@ -1582,31 +1582,31 @@ async fn withdrawal() {
             target: id,
             banker: AccountId::THE_BANK
         },
-        ExpectedState { assets: vec![(player(1), asset.clone(), 48)], ..Default::default() }
+        ExpectedState { assets: vec![(player(1), item.shallow_clone().into(), 48)], ..Default::default() }
     ).await;
     // Request an invalid withdrawal
     state.assert_state(
         Action::RequestWithdrawal {
             player: player(1),
-            assets: [(asset.clone(), 64)].into(),
+            assets: [(item.clone(), 64)].into(),
         },
-        ExpectedState { assets: vec![(player(1), asset.clone(), 48)], should_fail: true, ..Default::default() }
+        ExpectedState { assets: vec![(player(1), item.shallow_clone().into(), 48)], should_fail: true, ..Default::default() }
     ).await;
 }
 /// You shouldn't be able to order zero items
 #[tokio::test]
 async fn test_zero_orders() {
     let mut state = State::new();
-    let asset = AssetId::try_from("cobblestone").unwrap();
+    let item = ItemId::try_from("cobblestone").unwrap();
     state.apply(Action::Deposit {
         player: player(1),
-        asset: AssetId::DIAMOND,
+        asset: ItemId::DIAMOND,
         count: 100,
         banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit diamonds");
     state.apply(Action::Deposit {
         player: player(1),
-        asset: asset.clone(),
+        asset: item.clone(),
         count: 100,
         banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit cobblestone");
@@ -1616,7 +1616,7 @@ async fn test_zero_orders() {
     }, sink()).await.expect("Unable to buy coins");
     state.apply(Action::Deposit {
         player: player(1),
-        asset: AssetId::DIAMOND,
+        asset: ItemId::DIAMOND,
         count: 100,
         banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit diamonds");
@@ -1626,13 +1626,13 @@ async fn test_zero_orders() {
     }, sink()).await.expect("Unable to deposit cobblestone");
     state.apply(Action::BuyOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: item.shallow_clone().into(),
         count: 0,
         coins_per: Coins::from_coins(1)
     }, sink()).await.expect_err("Able to place zero buy order");
     state.apply(Action::SellOrder {
         player: player(1),
-        asset: asset.clone(),
+        asset: item.shallow_clone().into(),
         count: 0,
         coins_per: Coins::from_coins(2)
     }, sink()).await.expect_err("Able to place zero sell order");
@@ -1643,7 +1643,7 @@ async fn test_zero_cost_buy() {
     let asset = AssetId::try_from("cobblestone").unwrap();
     state.apply(Action::Deposit {
         player: player(1),
-        asset: AssetId::DIAMOND,
+        asset: ItemId::DIAMOND,
         count: 100,
         banker: AccountId::THE_BANK
     }, sink()).await.expect("Unable to deposit diamonds");
